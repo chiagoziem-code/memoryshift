@@ -140,7 +140,7 @@ function LearnerHome() {
             {sets.slice(0, 6).map((set) => (
               <Card key={set.setId} className="border-2">
                 <CardHeader className="gap-1">
-                  <CardTitle className="text-lg">{set.sourceLabel}</CardTitle>
+                  <CardTitle className="text-lg">{set.label}</CardTitle>
                   <p className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Clock className="size-4" />
                     {new Date(set.createdAt).toLocaleDateString()} · {set.items.length} card(s)
