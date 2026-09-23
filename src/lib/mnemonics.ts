@@ -144,6 +144,7 @@ export function rankFormats(profile: Profile): FormatId[] {
 
 export type SavedMnemonic = {
   id: string;
+  setId: string;
   format: FormatId;
   title: string;
   body: string;
@@ -152,6 +153,11 @@ export type SavedMnemonic = {
   sourceLabel: string;
   createdAt: string;
   liked: boolean | null;
+  favourite?: boolean;
+  /** Spaced repetition box: 0 = new, higher = longer gap. */
+  box?: number;
+  dueAt?: string;
+  reviews?: number;
 };
 
 const PROFILE_KEY = "memoryshift.profile.v1";
