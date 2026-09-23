@@ -153,8 +153,10 @@ function Studio() {
           images: images.map(({ mediaType, dataUrl }) => ({ mediaType, dataUrl })),
         },
       });
+      const setId = `set-${Date.now()}`;
       const created: SavedMnemonic[] = (output?.items ?? []).map((item, i) => ({
-        id: `${Date.now()}-${i}`,
+        id: `${setId}-${i}`,
+        setId,
         format: item.format as FormatId,
         title: item.title,
         body: item.body,
@@ -163,6 +165,10 @@ function Studio() {
         sourceLabel: output?.subject ?? "My material",
         createdAt: new Date().toISOString(),
         liked: null,
+        favourite: false,
+        box: 0,
+        dueAt: new Date().toISOString(),
+        reviews: 0,
       }));
       setResults(created);
       saveLibrary([...created, ...loadLibrary()]);

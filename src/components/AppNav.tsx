@@ -3,9 +3,11 @@ import { Sparkles } from "lucide-react";
 
 const links = [
   { to: "/", label: "Home" },
-  { to: "/onboarding", label: "Calibration" },
   { to: "/studio", label: "Studio" },
+  { to: "/review", label: "Review" },
+  { to: "/onboarding", label: "Calibration" },
   { to: "/profile", label: "My profile" },
+  { to: "/settings", label: "Reading & access" },
 ] as const;
 
 export function AppNav() {
@@ -24,7 +26,7 @@ export function AppNav() {
               key={link.to}
               to={link.to}
               activeOptions={{ exact: link.to === "/" }}
-              className="rounded-xl px-3 py-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground data-[status=active]:bg-secondary data-[status=active]:text-foreground data-[status=active]:font-semibold"
+              className="rounded-xl px-3 py-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground data-[status=active]:bg-secondary data-[status=active]:font-semibold data-[status=active]:text-foreground"
             >
               {link.label}
             </Link>
