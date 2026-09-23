@@ -43,7 +43,7 @@ function Onboarding() {
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [result, setResult] = useState<FormatId[] | null>(null);
 
-  const question = QUIZ[step];
+  const question = QUIZ[Math.min(step, QUIZ.length - 1)]!;
   const done = step >= QUIZ.length;
 
   function choose(index: number) {
