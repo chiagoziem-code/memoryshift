@@ -206,3 +206,67 @@ export function recordFeedback(profile: Profile, format: FormatId, liked: boolea
   if (!liked && scores[format] <= -4) avoided = [...avoided, format];
   return { ...profile, scores, favourites, avoided };
 }
+
+/* ---------------- Spaced repetition ---------------- */
+
+/** Days until the next review for each box. */
+export const BOX_GAPS_DAYS = [0, 1, 2, 4, 8, 16, 32];
+
+export type Confidence = "again" | "unsure" | "solid";
+
+export function isDue(item: SavedMnemonic, now = Date.now()) {
+  if (!item.dueAt) return true;
+  return new Date(item.dueAt).getTime() <= now;
+}
+
+export function dueItems(items: SavedMnemonic[], now = Date.now()) {
+  return items.filter((item) => isDue(item, now));
+}
+
+/** Move an item forward or back in the spaced-repetition schedule. */
+export function gradeItem(item: SavedMnemonic, confidence: Confidence): SavedMnemonic {
+  const current = item.box ?? 0;
+  const box =
+    confidence === "again"
+      ? 0
+      : confidence === "unsure"
+        ? Math.max(0, Math.min(current, BOX_GAPS_DAYS.length - 1))
+        : Math.min(current + 1, BOX_GAPS_DAYS.length - 1);
+  const gapDays = confidence === "again" ? 0 : Math.max(BOX_GAPS_DAYS[box] ?? 1, 1);
+  const dueAt = new Date(Date.now() + gapDays * 24 * 60 * 60 * 1000).toISOString();
+  return { ...item, box, dueAt, reviews: (item.reviews ?? 0) + 1 };
+}
+
+export function updateLibraryItem(id: string, change: (item: SavedMnemonic) => SavedMnemonic) {
+  const next = loadLibrary().map((item) => (item.id === id ? change(item) : item));
+  saveLibrary(next);
+  return next;
+}
+
+export type MnemonicSet = {
+  setId: string;
+  label: string;
+  createdAt: string;
+  items: SavedMnemonic[];
+};
+
+export function groupIntoSets(items: SavedMnemonic[]): MnemonicSet[] {
+  const map = new Map<string, MnemonicSet>();
+  for (const item of items) {
+    const setId = item.setId ?? item.id;
+    const existing = map.get(setId);
+    if (existing) {
+      existing.items.push(item);
+    } else {
+      map.set(setId, {
+        setId,
+        label: item.sourceLabel || "My material",
+        createdAt: item.createdAt,
+        items: [item],
+      });
+    }
+  }
+  return [...map.values()].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+}
