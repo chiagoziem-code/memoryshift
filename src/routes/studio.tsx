@@ -43,7 +43,7 @@ export const Route = createFileRoute("/studio")({
       { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
-  component: Studio;
+  component: Studio,
 });
 
 type Attachment = { name: string; mediaType: string; dataUrl: string };
