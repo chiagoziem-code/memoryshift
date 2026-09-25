@@ -270,3 +270,196 @@ export function groupIntoSets(items: SavedMnemonic[]): MnemonicSet[] {
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   );
 }
+
+/* ---------------- Review history & analytics ---------------- */
+
+export type ReviewEvent = {
+  id: string;
+  itemId: string;
+  setId: string;
+  format: FormatId;
+  confidence: Confidence;
+  boxAfter: number;
+  at: string;
+};
+
+const REVIEWS_KEY = "memoryshift.reviews.v1";
+const MAX_EVENTS = 500;
+
+export function loadReviewLog(): ReviewEvent[] {
+  if (typeof window === "undefined") return [];
+  try {
+    return JSON.parse(window.localStorage.getItem(REVIEWS_KEY) ?? "[]") as ReviewEvent[];
+  } catch {
+    return [];
+  }
+}
+
+export function saveReviewLog(events: ReviewEvent[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(REVIEWS_KEY, JSON.stringify(events.slice(0, MAX_EVENTS)));
+}
+
+export function logReview(item: SavedMnemonic, confidence: Confidence, boxAfter: number) {
+  const event: ReviewEvent = {
+    id: `rev-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    itemId: item.id,
+    setId: item.setId ?? item.id,
+    format: item.format,
+    confidence,
+    boxAfter,
+    at: new Date().toISOString(),
+  };
+  saveReviewLog([event, ...loadReviewLog()]);
+  return event;
+}
+
+const CONFIDENCE_VALUE: Record<Confidence, number> = { again: 0, unsure: 0.5, solid: 1 };
+
+export type DayPoint = { date: string; label: string; reviews: number; confidence: number };
+
+/** Average confidence per day for the last `days` days (oldest first). */
+export function confidenceTrend(events: ReviewEvent[], days = 14): DayPoint[] {
+  const points: DayPoint[] = [];
+  for (let offset = days - 1; offset >= 0; offset--) {
+    const day = new Date();
+    day.setHours(0, 0, 0, 0);
+    day.setDate(day.getDate() - offset);
+    const key = day.toISOString().slice(0, 10);
+    const onDay = events.filter((e) => e.at.slice(0, 10) === key);
+    const confidence =
+      onDay.length === 0
+        ? 0
+        : onDay.reduce((sum, e) => sum + CONFIDENCE_VALUE[e.confidence], 0) / onDay.length;
+    points.push({
+      date: key,
+      label: day.toLocaleDateString(undefined, { weekday: "short" }),
+      reviews: onDay.length,
+      confidence,
+    });
+  }
+  return points;
+}
+
+export type UpcomingBucket = { key: string; label: string; count: number };
+
+export function upcomingReviews(items: SavedMnemonic[], now = Date.now()): UpcomingBucket[] {
+  const day = 24 * 60 * 60 * 1000;
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+  const endOfToday = startOfToday.getTime() + day;
+  const buckets: UpcomingBucket[] = [
+    { key: "due", label: "Ready now", count: 0 },
+    { key: "tomorrow", label: "Tomorrow", count: 0 },
+    { key: "week", label: "This week", count: 0 },
+    { key: "later", label: "Later", count: 0 },
+  ];
+  for (const item of items) {
+    const at = item.dueAt ? new Date(item.dueAt).getTime() : now;
+    if (at <= now) buckets[0]!.count++;
+    else if (at < endOfToday + day) buckets[1]!.count++;
+    else if (at < endOfToday + 7 * day) buckets[2]!.count++;
+    else buckets[3]!.count++;
+  }
+  return buckets;
+}
+
+export type FormatInsight = {
+  format: FormatId;
+  reviews: number;
+  solidRate: number;
+  confidence: number;
+  cards: number;
+};
+
+/** How well each format is working for this learner, best first. */
+export function formatInsights(
+  items: SavedMnemonic[],
+  events: ReviewEvent[],
+): FormatInsight[] {
+  return FORMATS.map((format) => {
+    const own = events.filter((e) => e.format === format.id);
+    const solid = own.filter((e) => e.confidence === "solid").length;
+    return {
+      format: format.id,
+      reviews: own.length,
+      solidRate: own.length === 0 ? 0 : solid / own.length,
+      confidence:
+        own.length === 0
+          ? 0
+          : own.reduce((sum, e) => sum + CONFIDENCE_VALUE[e.confidence], 0) / own.length,
+      cards: items.filter((i) => i.format === format.id).length,
+    };
+  })
+    .filter((insight) => insight.cards > 0 || insight.reviews > 0)
+    .sort((a, b) => b.confidence - a.confidence || b.reviews - a.reviews);
+}
+
+export function reviewStreak(events: ReviewEvent[]): number {
+  if (events.length === 0) return 0;
+  const dates = new Set(events.map((e) => e.at.slice(0, 10)));
+  let streak = 0;
+  const cursor = new Date();
+  cursor.setHours(0, 0, 0, 0);
+  for (;;) {
+    const key = cursor.toISOString().slice(0, 10);
+    if (!dates.has(key)) break;
+    streak++;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+
+/* ---------------- Learner storage (one place for everything) ---------------- */
+
+export const STORAGE_KEYS = {
+  profile: PROFILE_KEY,
+  library: LIBRARY_KEY,
+  reviews: REVIEWS_KEY,
+  access: "memoryshift.a11y.v1",
+} as const;
+
+export type LearnerBackup = {
+  version: 1;
+  exportedAt: string;
+  profile: unknown;
+  library: unknown;
+  reviews: unknown;
+  access: unknown;
+};
+
+export function exportLearnerData(): LearnerBackup {
+  const read = (key: string) => {
+    if (typeof window === "undefined") return null;
+    try {
+      return JSON.parse(window.localStorage.getItem(key) ?? "null");
+    } catch {
+      return null;
+    }
+  };
+  return {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    profile: read(STORAGE_KEYS.profile),
+    library: read(STORAGE_KEYS.library),
+    reviews: read(STORAGE_KEYS.reviews),
+    access: read(STORAGE_KEYS.access),
+  };
+}
+
+export function importLearnerData(backup: LearnerBackup) {
+  if (typeof window === "undefined") return;
+  const write = (key: string, value: unknown) => {
+    if (value === null || value === undefined) return;
+    window.localStorage.setItem(key, JSON.stringify(value));
+  };
+  write(STORAGE_KEYS.profile, backup.profile);
+  write(STORAGE_KEYS.library, backup.library);
+  write(STORAGE_KEYS.reviews, backup.reviews);
+  write(STORAGE_KEYS.access, backup.access);
+}
+
+export function clearLearnerData() {
+  if (typeof window === "undefined") return;
+  for (const key of Object.values(STORAGE_KEYS)) window.localStorage.removeItem(key);
+}
