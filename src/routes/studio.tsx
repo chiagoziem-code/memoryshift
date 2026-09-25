@@ -67,8 +67,10 @@ function Studio() {
   const [text, setText] = useState("");
   const [notes, setNotes] = useState("");
   const [images, setImages] = useState<Attachment[]>([]);
-  const [mediaLabel, setMediaLabel] = useState<string | null>(null);
+  const [mediaLabels, setMediaLabels] = useState<string[]>([]);
+  const [isFormula, setIsFormula] = useState(false);
   const [busy, setBusy] = useState<"idle" | "transcribing" | "generating">("idle");
+
   const [selected, setSelected] = useState<FormatId[]>([]);
   const [results, setResults] = useState<SavedMnemonic[]>([]);
 
