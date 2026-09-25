@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as HomeRouteImport } from './routes/home'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as ProfileRouteImport } from './routes/profile'
+import { Route as ProgressRouteImport } from './routes/progress'
 import { Route as ReviewRouteImport } from './routes/review'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as StudioRouteImport } from './routes/studio'
@@ -37,6 +38,11 @@ const ProfileRoute = ProfileRouteImport.update({
   path: '/profile',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProgressRoute = ProgressRouteImport.update({
+  id: '/progress',
+  path: '/progress',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ReviewRoute = ReviewRouteImport.update({
   id: '/review',
   path: '/review',
@@ -58,6 +64,7 @@ export interface FileRoutesByFullPath {
   '/home': typeof HomeRoute
   '/onboarding': typeof OnboardingRoute
   '/profile': typeof ProfileRoute
+  '/progress': typeof ProgressRoute
   '/review': typeof ReviewRoute
   '/settings': typeof SettingsRoute
   '/studio': typeof StudioRoute
@@ -67,6 +74,7 @@ export interface FileRoutesByTo {
   '/home': typeof HomeRoute
   '/onboarding': typeof OnboardingRoute
   '/profile': typeof ProfileRoute
+  '/progress': typeof ProgressRoute
   '/review': typeof ReviewRoute
   '/settings': typeof SettingsRoute
   '/studio': typeof StudioRoute
@@ -77,6 +85,7 @@ export interface FileRoutesById {
   '/home': typeof HomeRoute
   '/onboarding': typeof OnboardingRoute
   '/profile': typeof ProfileRoute
+  '/progress': typeof ProgressRoute
   '/review': typeof ReviewRoute
   '/settings': typeof SettingsRoute
   '/studio': typeof StudioRoute
@@ -88,6 +97,7 @@ export interface FileRouteTypes {
     | '/home'
     | '/onboarding'
     | '/profile'
+    | '/progress'
     | '/review'
     | '/settings'
     | '/studio'
@@ -97,6 +107,7 @@ export interface FileRouteTypes {
     | '/home'
     | '/onboarding'
     | '/profile'
+    | '/progress'
     | '/review'
     | '/settings'
     | '/studio'
@@ -106,6 +117,7 @@ export interface FileRouteTypes {
     | '/home'
     | '/onboarding'
     | '/profile'
+    | '/progress'
     | '/review'
     | '/settings'
     | '/studio'
@@ -116,6 +128,7 @@ export interface RootRouteChildren {
   HomeRoute: typeof HomeRoute
   OnboardingRoute: typeof OnboardingRoute
   ProfileRoute: typeof ProfileRoute
+  ProgressRoute: typeof ProgressRoute
   ReviewRoute: typeof ReviewRoute
   SettingsRoute: typeof SettingsRoute
   StudioRoute: typeof StudioRoute
@@ -151,6 +164,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProfileRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/progress': {
+      id: '/progress'
+      path: '/progress'
+      fullPath: '/progress'
+      preLoaderRoute: typeof ProgressRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/review': {
       id: '/review'
       path: '/review'
@@ -180,6 +200,7 @@ const rootRouteChildren: RootRouteChildren = {
   HomeRoute: HomeRoute,
   OnboardingRoute: OnboardingRoute,
   ProfileRoute: ProfileRoute,
+  ProgressRoute: ProgressRoute,
   ReviewRoute: ReviewRoute,
   SettingsRoute: SettingsRoute,
   StudioRoute: StudioRoute,

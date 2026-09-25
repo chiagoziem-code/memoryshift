@@ -18,6 +18,8 @@ import {
   gradeItem,
   loadLibrary,
   loadProfile,
+  logReview,
+
   recordFeedback,
   saveProfile,
   updateLibraryItem,
@@ -73,14 +75,16 @@ function ReviewPage() {
 
   function grade(confidence: Confidence) {
     if (!current) return;
-    updateLibraryItem(current.id, (item) => gradeItem(item, confidence));
+    const graded = gradeItem(current, confidence);
+    updateLibraryItem(current.id, () => graded);
+    logReview(current, confidence, graded.box ?? 0);
     if (confidence !== "again") {
       const profile = loadProfile();
       saveProfile(
         recordFeedback(profile, current.format, confidence === "solid"),
       );
     }
-    const gap = BOX_GAPS_DAYS[gradeItem(current, confidence).box ?? 0] ?? 1;
+    const gap = BOX_GAPS_DAYS[graded.box ?? 0] ?? 1;
     toast.success(
       confidence === "again" ? "We'll show this again today" : `Next time in about ${gap} day(s)`,
     );
@@ -88,6 +92,7 @@ function ReviewPage() {
     setRevealed(false);
     setIndex((i) => i + 1);
   }
+
 
   return (
     <div className="min-h-screen">

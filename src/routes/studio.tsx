@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
-import { FileText, Image as ImageIcon, Loader2, Mic, Sparkles, Video, X } from "lucide-react";
+import { FileText, Image as ImageIcon, Loader2, Mic, Sigma, Sparkles, Video, X } from "lucide-react";
 import { toast } from "sonner";
 import { AppNav } from "@/components/AppNav";
 import { MnemonicCard } from "@/components/MnemonicCard";
@@ -67,8 +67,10 @@ function Studio() {
   const [text, setText] = useState("");
   const [notes, setNotes] = useState("");
   const [images, setImages] = useState<Attachment[]>([]);
-  const [mediaLabel, setMediaLabel] = useState<string | null>(null);
+  const [mediaLabels, setMediaLabels] = useState<string[]>([]);
+  const [isFormula, setIsFormula] = useState(false);
   const [busy, setBusy] = useState<"idle" | "transcribing" | "generating">("idle");
+
   const [selected, setSelected] = useState<FormatId[]>([]);
   const [results, setResults] = useState<SavedMnemonic[]>([]);
 
@@ -106,22 +108,27 @@ function Studio() {
   }
 
   async function onMedia(files: FileList | null) {
-    const file = files?.[0];
-    if (!file) return;
-    if (file.size > MAX_BYTES) {
-      toast.error("That recording is too large (8 MB max)");
-      return;
-    }
+    const picked = Array.from(files ?? []).slice(0, 3);
+    if (picked.length === 0) return;
     setBusy("transcribing");
     try {
-      const dataUrl = await readFile(file);
-      const { text: transcript } = await transcribe({
-        data: { mediaType: file.type || "audio/mpeg", dataUrl, fileName: file.name },
-      });
-      if (!transcript.trim()) throw new Error("No speech found in that file");
-      setText((current) => (current ? `${current}\n\n${transcript}` : transcript));
-      setMediaLabel(file.name);
-      toast.success("Recording written out — check the text below");
+      for (const file of picked) {
+        if (file.size > MAX_BYTES) {
+          toast.error(`${file.name} is too large (8 MB max)`);
+          continue;
+        }
+        const dataUrl = await readFile(file);
+        const { text: transcript } = await transcribe({
+          data: { mediaType: file.type || "audio/mpeg", dataUrl, fileName: file.name },
+        });
+        if (!transcript.trim()) {
+          toast.error(`No speech found in ${file.name}`);
+          continue;
+        }
+        setText((current) => (current ? `${current}\n\n${transcript}` : transcript));
+        setMediaLabels((current) => [...current, file.name]);
+      }
+      toast.success("Recording written out — you can edit the words below");
     } catch (error) {
       toast.error(
         error instanceof Error
@@ -132,6 +139,7 @@ function Studio() {
       setBusy("idle");
     }
   }
+
 
   async function onGenerate() {
     if (!text.trim() && images.length === 0) {
@@ -144,15 +152,27 @@ function Studio() {
     }
     setBusy("generating");
     try {
+      const inputHints = [
+        notes,
+        isFormula
+          ? "The attached images show maths or a formula: read every symbol carefully and keep the steps in order."
+          : "",
+        mediaLabels.length > 0
+          ? "Some of the text came from a recording, so wording may be rough."
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
       const output = await generate({
         data: {
           text,
-          notes,
+          notes: inputHints,
           formats: selected,
           readingLevel: profile?.readingLevel ?? "simple",
           images: images.map(({ mediaType, dataUrl }) => ({ mediaType, dataUrl })),
         },
       });
+
       const setId = `set-${Date.now()}`;
       const created: SavedMnemonic[] = (output?.items ?? []).map((item, i) => ({
         id: `${setId}-${i}`,
@@ -242,7 +262,7 @@ function Studio() {
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="photos" className="text-base">
-                  <ImageIcon className="mr-2 inline size-4" /> Photos or formulas
+                  <ImageIcon className="mr-2 inline size-4" /> Photos, pages or formulas
                 </Label>
                 <Input
                   id="photos"
@@ -252,8 +272,19 @@ function Studio() {
                   onChange={(event) => void onImages(event.target.files)}
                 />
                 <p className="text-sm text-muted-foreground">
-                  A page from a book, a whiteboard, a handwritten equation.
+                  A page from a book, a whiteboard, a handwritten equation. Up to 3.
                 </p>
+                <button
+                  type="button"
+                  aria-pressed={isFormula}
+                  onClick={() => setIsFormula((v) => !v)}
+                  className={`rounded-xl border-2 px-3 py-2 text-sm font-semibold ${
+                    isFormula ? "border-primary bg-primary/10" : "border-border bg-card"
+                  }`}
+                >
+                  <Sigma className="mr-2 inline size-4" />
+                  {isFormula ? "Reading these as maths" : "These are maths or formulas"}
+                </button>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="media" className="text-base">
@@ -264,11 +295,12 @@ function Studio() {
                   id="media"
                   type="file"
                   accept="audio/*,video/*"
+                  multiple
                   onChange={(event) => void onMedia(event.target.files)}
                   disabled={busy !== "idle"}
                 />
                 <p className="text-sm text-muted-foreground">
-                  We write out what is said, then work from that.
+                  A lesson recording, a voice note, a video. We write out what is said.
                 </p>
               </div>
             </div>
@@ -279,11 +311,32 @@ function Studio() {
               </p>
             )}
 
-            {mediaLabel && (
-              <p className="rounded-xl bg-secondary px-4 py-3 text-base">
-                Added words from <span className="font-semibold">{mediaLabel}</span>
-              </p>
+            {mediaLabels.length > 0 && (
+              <div className="space-y-2 rounded-xl bg-secondary px-4 py-3 text-base">
+                <p className="font-semibold">Words added from:</p>
+                <ul className="space-y-1">
+                  {mediaLabels.map((label, index) => (
+                    <li key={label + index} className="flex items-center justify-between gap-3">
+                      <span>{label}</span>
+                      <button
+                        type="button"
+                        aria-label={`Forget ${label}`}
+                        onClick={() =>
+                          setMediaLabels((current) => current.filter((_, i) => i !== index))
+                        }
+                        className="rounded-lg p-1 hover:bg-card"
+                      >
+                        <X className="size-4" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-sm text-muted-foreground">
+                  You can fix any wrong words in the box above before we start.
+                </p>
+              </div>
             )}
+
 
             {images.length > 0 && (
               <div className="flex flex-wrap gap-3">
