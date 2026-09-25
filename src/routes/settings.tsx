@@ -1,5 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { RotateCcw } from "lucide-react";
+import { useRef } from "react";
+import { Download, RotateCcw, Trash2, Upload } from "lucide-react";
+import { toast } from "sonner";
 import { AppNav } from "@/components/AppNav";
 import { ReadAloud } from "@/components/ReadAloud";
 import { Button } from "@/components/ui/button";
@@ -8,6 +10,13 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { FONT_STACKS, useA11y, type ContrastChoice, type FontChoice } from "@/lib/a11y";
+import {
+  clearLearnerData,
+  exportLearnerData,
+  importLearnerData,
+  type LearnerBackup,
+} from "@/lib/mnemonics";
+
 
 export const Route = createFileRoute("/settings")({
   head: () => ({
@@ -42,6 +51,41 @@ const SAMPLE =
 
 function SettingsPage() {
   const { settings, update, reset } = useA11y();
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  function onBackup() {
+    const blob = new Blob([JSON.stringify(exportLearnerData(), null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `memoryshift-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    toast.success("Saved a copy to your downloads");
+  }
+
+  async function onRestore(file: File | null) {
+    if (!file) return;
+    try {
+      const backup = JSON.parse(await file.text()) as LearnerBackup;
+      importLearnerData(backup);
+      toast.success("Your learning is back — reloading");
+      setTimeout(() => window.location.reload(), 600);
+    } catch {
+      toast.error("That file didn't look like a MemoryShift copy");
+    }
+  }
+
+  function onClear() {
+    if (!window.confirm("Delete all your memory aids, favourites and progress on this device?"))
+      return;
+    clearLearnerData();
+    toast.success("All cleared — reloading");
+    setTimeout(() => window.location.reload(), 600);
+  }
+
 
   return (
     <div className="min-h-screen">
@@ -190,9 +234,40 @@ function SettingsPage() {
           </CardContent>
         </Card>
 
+        <Card className="border-2">
+          <CardHeader>
+            <CardTitle className="text-xl">Your saved learning</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 text-base">
+            <p className="text-muted-foreground">
+              Your memory aids, favourites, review progress and these settings are kept on this
+              device. Save a copy to move them to another device.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <Button variant="secondary" onClick={onBackup}>
+                <Download className="mr-2 size-4" /> Save a copy
+              </Button>
+              <Button variant="secondary" onClick={() => fileRef.current?.click()}>
+                <Upload className="mr-2 size-4" /> Bring a copy back
+              </Button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="application/json"
+                className="sr-only"
+                onChange={(event) => void onRestore(event.target.files?.[0] ?? null)}
+              />
+              <Button variant="ghost" onClick={onClear}>
+                <Trash2 className="mr-2 size-4" /> Delete everything
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
         <Button variant="ghost" size="lg" onClick={reset}>
           <RotateCcw className="mr-2 size-4" /> Put everything back to the start
         </Button>
+
       </main>
     </div>
   );
