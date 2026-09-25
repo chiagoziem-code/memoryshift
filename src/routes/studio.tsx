@@ -108,22 +108,27 @@ function Studio() {
   }
 
   async function onMedia(files: FileList | null) {
-    const file = files?.[0];
-    if (!file) return;
-    if (file.size > MAX_BYTES) {
-      toast.error("That recording is too large (8 MB max)");
-      return;
-    }
+    const picked = Array.from(files ?? []).slice(0, 3);
+    if (picked.length === 0) return;
     setBusy("transcribing");
     try {
-      const dataUrl = await readFile(file);
-      const { text: transcript } = await transcribe({
-        data: { mediaType: file.type || "audio/mpeg", dataUrl, fileName: file.name },
-      });
-      if (!transcript.trim()) throw new Error("No speech found in that file");
-      setText((current) => (current ? `${current}\n\n${transcript}` : transcript));
-      setMediaLabel(file.name);
-      toast.success("Recording written out — check the text below");
+      for (const file of picked) {
+        if (file.size > MAX_BYTES) {
+          toast.error(`${file.name} is too large (8 MB max)`);
+          continue;
+        }
+        const dataUrl = await readFile(file);
+        const { text: transcript } = await transcribe({
+          data: { mediaType: file.type || "audio/mpeg", dataUrl, fileName: file.name },
+        });
+        if (!transcript.trim()) {
+          toast.error(`No speech found in ${file.name}`);
+          continue;
+        }
+        setText((current) => (current ? `${current}\n\n${transcript}` : transcript));
+        setMediaLabels((current) => [...current, file.name]);
+      }
+      toast.success("Recording written out — you can edit the words below");
     } catch (error) {
       toast.error(
         error instanceof Error
@@ -134,6 +139,7 @@ function Studio() {
       setBusy("idle");
     }
   }
+
 
   async function onGenerate() {
     if (!text.trim() && images.length === 0) {

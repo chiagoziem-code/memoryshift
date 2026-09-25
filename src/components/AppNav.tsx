@@ -6,6 +6,8 @@ const links = [
   { to: "/home", label: "My space" },
   { to: "/studio", label: "Studio" },
   { to: "/review", label: "Review" },
+  { to: "/progress", label: "Progress" },
+
   { to: "/onboarding", label: "Calibration" },
   { to: "/profile", label: "My profile" },
   { to: "/settings", label: "Reading & access" },
