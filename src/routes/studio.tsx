@@ -105,6 +105,25 @@ function Studio() {
       picked.push({ name: file.name, mediaType: file.type, dataUrl: await readFile(file) });
     }
     setImages((current) => [...current, ...picked].slice(0, 3));
+    if (picked.length === 0) return;
+    setBusy("transcribing");
+    try {
+      const { text: words } = await readPictures({
+        data: {
+          isFormula,
+          images: picked.map(({ mediaType, dataUrl }) => ({ mediaType, dataUrl })),
+        },
+      });
+      if (words.trim()) {
+        setText((current) => (current ? `${current}\n\n${words}` : words));
+        setMediaLabels((current) => [...current, ...picked.map((p) => p.name)]);
+        toast.success("Picture words written out — check them below");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? `We couldn't read that picture. ${error.message}` : "We couldn't read that picture.");
+    } finally {
+      setBusy("idle");
+    }
   }
 
   async function onMedia(files: FileList | null) {
@@ -117,9 +136,18 @@ function Studio() {
           toast.error(`${file.name} is too large (8 MB max)`);
           continue;
         }
-        const dataUrl = await readFile(file);
+        let dataUrl: string;
+        let mediaType = file.type || "audio/mpeg";
+        let fileName = file.name;
+        if (mediaType.startsWith("video/")) {
+          dataUrl = await videoToWavDataUrl(file);
+          mediaType = "audio/wav";
+          fileName = file.name.replace(/\.[^.]+$/, "") + ".wav";
+        } else {
+          dataUrl = await readFile(file);
+        }
         const { text: transcript } = await transcribe({
-          data: { mediaType: file.type || "audio/mpeg", dataUrl, fileName: file.name },
+          data: { mediaType, dataUrl, fileName },
         });
         if (!transcript.trim()) {
           toast.error(`No speech found in ${file.name}`);
