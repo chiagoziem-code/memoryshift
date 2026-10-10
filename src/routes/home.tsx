@@ -109,6 +109,14 @@ function LearnerHome() {
               </CardContent>
             </Card>
           </div>
+          <div className="flex flex-wrap gap-3">
+            <Button asChild variant="outline" size="lg">
+              <Link to="/progress">See my progress</Link>
+            </Button>
+            <Button asChild variant="outline" size="lg">
+              <Link to="/library">Browse ready-made memory aids</Link>
+            </Button>
+          </div>
           {topFormats.length > 0 && (
             <p className="text-base text-muted-foreground">
               Your top kinds right now:{" "}
