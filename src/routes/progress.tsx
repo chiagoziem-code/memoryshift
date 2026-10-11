@@ -9,6 +9,7 @@ import {
   confidenceTrend,
   formatById,
   formatInsights,
+  LEARNER_DATA_EVENT,
   loadLibrary,
   loadReviewLog,
   reviewStreak,
@@ -46,8 +47,22 @@ function ProgressPage() {
   const [events, setEvents] = useState<ReviewEvent[]>([]);
 
   useEffect(() => {
-    setLibrary(loadLibrary());
-    setEvents(loadReviewLog());
+    const refresh = () => {
+      setLibrary(loadLibrary());
+      setEvents(loadReviewLog());
+    };
+    refresh();
+    const onVisible = () => document.visibilityState === "visible" && refresh();
+    window.addEventListener(LEARNER_DATA_EVENT, refresh);
+    window.addEventListener("storage", refresh);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener(LEARNER_DATA_EVENT, refresh);
+      window.removeEventListener("storage", refresh);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   const trend = useMemo(() => confidenceTrend(events, 14), [events]);
