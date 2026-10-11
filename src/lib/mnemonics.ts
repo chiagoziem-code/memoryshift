@@ -193,7 +193,13 @@ export function loadLibrary(): SavedMnemonic[] {
 
 export function saveLibrary(items: SavedMnemonic[]) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(LIBRARY_KEY, JSON.stringify(items.slice(0, 60)));
+  window.localStorage.setItem(LIBRARY_KEY, JSON.stringify(items.slice(0, 200)));
+  notifyLearnerData();
+}
+
+export const LEARNER_DATA_EVENT = "memoryshift:data";
+export function notifyLearnerData() {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(LEARNER_DATA_EVENT));
 }
 
 /** Nudge the profile when a learner likes or dislikes an output. */
@@ -298,6 +304,7 @@ export function loadReviewLog(): ReviewEvent[] {
 export function saveReviewLog(events: ReviewEvent[]) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(REVIEWS_KEY, JSON.stringify(events.slice(0, MAX_EVENTS)));
+  notifyLearnerData();
 }
 
 export function logReview(item: SavedMnemonic, confidence: Confidence, boxAfter: number) {
