@@ -103,6 +103,39 @@ export const generateMnemonics = createServerFn({ method: "POST" })
     return await result.output;
   });
 
+const ReadImageInput = z.object({
+  isFormula: z.boolean().default(false),
+  images: z
+    .array(z.object({ mediaType: z.string(), dataUrl: z.string() }))
+    .min(1)
+    .max(3),
+});
+
+export const readImageText = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) => ReadImageInput.parse(input))
+  .handler(async ({ data }) => {
+    const instruction = data.isFormula
+      ? "These pictures contain maths or formulas. Write out every formula, symbol and step exactly, using plain text notation (for example x^2, sqrt(3), a/b). Keep the order of steps. Add a one-line plain-words note under each formula saying what it means."
+      : "Write out all the words and facts you can read in these pictures, in order. Use short lines. If something is a list, keep it as a list. Do not add facts that are not visible.";
+
+    const parts: Array<
+      { type: "text"; text: string } | { type: "file"; mediaType: string; data: string }
+    > = [{ type: "text", text: instruction }];
+    for (const image of data.images) {
+      parts.push({ type: "file", mediaType: image.mediaType, data: image.dataUrl });
+    }
+
+    const result = streamText({
+      model: createResponsesModel(),
+      system:
+        "You transcribe study material from photos for a dyslexic learner. Output only the transcribed content: short lines, common words, no commentary, no markdown headers.",
+      messages: [{ role: "user", content: parts }],
+      providerOptions: responsesProviderOptions,
+    });
+
+    return { text: (await result.text).trim() };
+  });
+
 const TranscribeInput = z.object({
   mediaType: z.string(),
   dataUrl: z.string(),
