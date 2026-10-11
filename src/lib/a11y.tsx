@@ -4,9 +4,12 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
+import { toast } from "sonner";
+import { speechClip } from "@/lib/audio";
 
 export type FontChoice = "lexend" | "atkinson" | "system" | "serif" | "mono";
 export type ContrastChoice = "cream" | "white" | "dark" | "high";
@@ -22,6 +25,11 @@ export type A11ySettings = {
   reducedMotion: boolean;
   speechRate: number; // 0.5 - 1.5
   readingRuler: boolean;
+  /** "natural" = AI voice (falls back to the device voice), "device" = built-in voice. */
+  voice: "natural" | "device";
+  naturalVoice: "warm" | "bright";
+  /** Memory aids and questions play by themselves when they appear. */
+  audioFirst: boolean;
 };
 
 export const FONT_STACKS: Record<FontChoice, { label: string; stack: string }> = {
@@ -46,6 +54,9 @@ export const defaultSettings = (): A11ySettings => ({
   reducedMotion: false,
   speechRate: 0.9,
   readingRuler: false,
+  voice: "natural",
+  naturalVoice: "warm",
+  audioFirst: true,
 });
 
 const KEY = "memoryshift.a11y.v1";
@@ -78,9 +89,16 @@ type Ctx = {
   settings: A11ySettings;
   update: (patch: Partial<A11ySettings>) => void;
   reset: () => void;
-  speak: (text: string) => void;
+  /** Read text aloud. Resolves when it finishes (or is stopped). */
+  speak: (text: string) => Promise<void>;
+  /** Read several parts in order, reporting which part is playing. */
+  speakParts: (parts: string[], onPart?: (index: number) => void) => Promise<void>;
   stopSpeaking: () => void;
   speaking: boolean;
+  /** The text currently being read, so each button knows if it is the one playing. */
+  speakingText: string | null;
+  /** True while a natural-voice clip is being fetched. */
+  loadingVoice: boolean;
 };
 
 const A11yContext = createContext<Ctx | null>(null);
@@ -115,31 +133,120 @@ export function A11yProvider({ children }: { children: ReactNode }) {
     if (typeof window !== "undefined") window.localStorage.setItem(KEY, JSON.stringify(next));
   }, []);
 
+  const [speakingText, setSpeakingText] = useState<string | null>(null);
+  const [loadingVoice, setLoadingVoice] = useState(false);
+  const run = useRef(0);
+  const audio = useRef<HTMLAudioElement | null>(null);
+  const warned = useRef(false);
+
   const stopSpeaking = useCallback(() => {
-    if (typeof window === "undefined" || !window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
+    run.current++;
+    if (audio.current) {
+      audio.current.pause();
+      audio.current.src = "";
+    }
+    if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
     setSpeaking(false);
+    setSpeakingText(null);
+    setLoadingVoice(false);
   }, []);
 
-  const speak = useCallback(
-    (text: string) => {
-      if (typeof window === "undefined" || !window.speechSynthesis) return;
+  /** Play one piece of text; resolves when done. Returns false if stopped. */
+  const playOne = useCallback(
+    async (text: string, token: number): Promise<boolean> => {
+      if (typeof window === "undefined" || !text.trim()) return true;
+      if (settings.voice === "natural") {
+        try {
+          setLoadingVoice(true);
+          const blob = await speechClip(text, settings.naturalVoice);
+          setLoadingVoice(false);
+          if (token !== run.current) return false;
+          const el = audio.current ?? new Audio();
+          audio.current = el;
+          const url = URL.createObjectURL(blob);
+          el.src = url;
+          el.playbackRate = settings.speechRate / 0.9;
+          const ended = new Promise<void>((resolve) => {
+            el.onended = () => resolve();
+            el.onerror = () => resolve();
+            el.onpause = () => resolve();
+          });
+          await el.play();
+          await ended;
+          URL.revokeObjectURL(url);
+          return token === run.current;
+        } catch (error) {
+          setLoadingVoice(false);
+          if (token !== run.current) return false;
+          if (!warned.current) {
+            warned.current = true;
+            toast.message("Using this device's voice for now", {
+              description: error instanceof Error ? error.message : undefined,
+            });
+          }
+        }
+      }
+      if (!window.speechSynthesis) return true;
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.rate = settings.speechRate;
-      utterance.onend = () => setSpeaking(false);
-      utterance.onerror = () => setSpeaking(false);
-      setSpeaking(true);
-      window.speechSynthesis.speak(utterance);
+      await new Promise<void>((resolve) => {
+        utterance.onend = () => resolve();
+        utterance.onerror = () => resolve();
+        window.speechSynthesis.speak(utterance);
+      });
+      return token === run.current;
     },
-    [settings.speechRate],
+    [settings.voice, settings.naturalVoice, settings.speechRate],
   );
+
+  const speakParts = useCallback(
+    async (parts: string[], onPart?: (index: number) => void) => {
+      stopSpeaking();
+      const token = ++run.current;
+      const all = parts.join(". ");
+      setSpeaking(true);
+      setSpeakingText(all);
+      // Fetch the next clip while the current one plays.
+      if (settings.voice === "natural") {
+        parts.slice(0, 2).forEach((p) => void speechClip(p, settings.naturalVoice).catch(() => undefined));
+      }
+      for (let i = 0; i < parts.length; i++) {
+        if (token !== run.current) return;
+        onPart?.(i);
+        const next = parts[i + 1];
+        if (next && settings.voice === "natural") {
+          void speechClip(next, settings.naturalVoice).catch(() => undefined);
+        }
+        const finished = await playOne(parts[i]!, token);
+        if (!finished) return;
+      }
+      if (token === run.current) {
+        setSpeaking(false);
+        setSpeakingText(null);
+        onPart?.(-1);
+      }
+    },
+    [playOne, stopSpeaking, settings.voice, settings.naturalVoice],
+  );
+
+  const speak = useCallback((text: string) => speakParts([text]), [speakParts]);
 
   useEffect(() => () => stopSpeaking(), [stopSpeaking]);
 
   const value = useMemo(
-    () => ({ settings, update, reset, speak, stopSpeaking, speaking }),
-    [settings, update, reset, speak, stopSpeaking, speaking],
+    () => ({
+      settings,
+      update,
+      reset,
+      speak,
+      speakParts,
+      stopSpeaking,
+      speaking,
+      speakingText,
+      loadingVoice,
+    }),
+    [settings, update, reset, speak, speakParts, stopSpeaking, speaking, speakingText, loadingVoice],
   );
 
   return <A11yContext.Provider value={value}>{children}</A11yContext.Provider>;

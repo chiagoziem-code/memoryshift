@@ -25,12 +25,21 @@ export function RecallQuiz({
   questions: RecallQuestion[];
   onDone: (answers: number[]) => void;
 }) {
-  const { stopSpeaking } = useA11y();
+  const { stopSpeaking, speak, settings } = useA11y();
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<number[]>([]);
   const current = questions[index];
 
   useEffect(() => () => stopSpeaking(), [stopSpeaking]);
+
+  const spokenText = current
+    ? [current.question, ...current.options.map((o, i) => `${String.fromCharCode(65 + i)}: ${o}`)].join(". ")
+    : "";
+
+  // Audio-first: read each question out as it appears.
+  useEffect(() => {
+    if (settings.audioFirst && spokenText) void speak(spokenText);
+  }, [spokenText, settings.audioFirst, speak]);
 
   if (!current) return null;
 

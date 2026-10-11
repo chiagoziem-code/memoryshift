@@ -1,38 +1,184 @@
-import { ThumbsDown, ThumbsUp } from "lucide-react";
-import { ReadAloud } from "@/components/ReadAloud";
+import { useState } from "react";
+import { Download, Loader2, Music, Pause, Play, ThumbsDown, ThumbsUp } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useA11y } from "@/lib/a11y";
+import { downloadBlob, songClip, speechClip } from "@/lib/audio";
 import { formatById, type SavedMnemonic } from "@/lib/mnemonics";
+
+/** The pieces of a memory aid, in reading order: title, body, each step, practice tip. */
+export function mnemonicParts(item: SavedMnemonic) {
+  return [
+    item.title,
+    item.body,
+    ...item.steps,
+    item.practiceTip ? `Practise: ${item.practiceTip}` : "",
+  ].filter((p) => p.trim().length > 0);
+}
+
+/** Lyrics for the sung version: the rhyme itself, plus its lines if the body is short. */
+function lyricsFor(item: SavedMnemonic) {
+  const body = item.body.trim();
+  return body.length >= 60 ? body : [body, ...item.steps].join("\n");
+}
+
+const highlight = "ring-4 ring-primary/40 bg-primary/10 rounded-xl";
 
 export function MnemonicCard({
   item,
   onFeedback,
+  activePart,
 }: {
   item: SavedMnemonic;
   onFeedback?: (liked: boolean) => void;
+  /** Part being read by an outside player (e.g. audio-first playlist); -1 or undefined for none. */
+  activePart?: number;
 }) {
   const format = formatById(item.format);
+  const { speakParts, stopSpeaking, speakingText, loadingVoice, settings } = useA11y();
+  const parts = mnemonicParts(item);
+  const allText = parts.join(". ");
+  const [ownPart, setOwnPart] = useState(-1);
+  const [busy, setBusy] = useState<"download" | "song" | "song-download" | null>(null);
+  const [songUrl, setSongUrl] = useState<string | null>(null);
+
+  const playingHere = speakingText === allText;
+  const current = activePart !== undefined && activePart >= 0 ? activePart : playingHere ? ownPart : -1;
+
+  // Index helpers so the right block lights up.
+  const bodyIndex = 1;
+  const stepStart = 2;
+  const tipIndex = item.practiceTip ? stepStart + item.steps.length : -1;
+
+  async function onDownload() {
+    setBusy("download");
+    try {
+      const blob = await speechClip(allText, settings.naturalVoice);
+      downloadBlob(blob, item.title);
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? `Couldn't make the audio file. ${error.message}`
+          : "Couldn't make the audio file.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function onSing() {
+    stopSpeaking();
+    setBusy("song");
+    try {
+      const blob = await songClip(lyricsFor(item), item.title);
+      const url = URL.createObjectURL(blob);
+      setSongUrl(url);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? `Couldn't make the song. ${error.message}` : "Couldn't make the song.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function onDownloadSong() {
+    setBusy("song-download");
+    try {
+      downloadBlob(await songClip(lyricsFor(item), item.title), `${item.title} song`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't download the song.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
-    <Card className="border-2">
+    <Card className="border-2" data-testid="mnemonic-card">
       <CardHeader className="gap-2">
         <div className="flex items-center gap-2 text-sm font-semibold text-primary">
           <span aria-hidden>{format.emoji}</span>
           {format.name}
         </div>
-        <CardTitle className="text-2xl">{item.title}</CardTitle>
-        <div>
-          <ReadAloud
-            text={[item.title, item.body, ...item.steps, item.practiceTip].filter(Boolean).join(". ")}
-            size="default"
-          />
+        <CardTitle className={`text-2xl ${current === 0 ? highlight : ""}`}>{item.title}</CardTitle>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            size="lg"
+            onClick={() =>
+              playingHere ? stopSpeaking() : void speakParts(parts, (i) => setOwnPart(i))
+            }
+          >
+            {playingHere && loadingVoice ? (
+              <Loader2 className="mr-2 size-5 animate-spin" />
+            ) : playingHere ? (
+              <Pause className="mr-2 size-5" />
+            ) : (
+              <Play className="mr-2 size-5" />
+            )}
+            {playingHere ? "Stop" : "Listen"}
+          </Button>
+          <Button
+            type="button"
+            size="lg"
+            variant="outline"
+            onClick={() => void onDownload()}
+            disabled={busy !== null}
+          >
+            {busy === "download" ? (
+              <Loader2 className="mr-2 size-5 animate-spin" />
+            ) : (
+              <Download className="mr-2 size-5" />
+            )}
+            Save audio
+          </Button>
+          {item.format === "rhyme" && (
+            <Button
+              type="button"
+              size="lg"
+              variant="secondary"
+              onClick={() => void onSing()}
+              disabled={busy !== null}
+            >
+              {busy === "song" ? (
+                <Loader2 className="mr-2 size-5 animate-spin" />
+              ) : (
+                <Music className="mr-2 size-5" />
+              )}
+              {busy === "song" ? "Writing the song…" : "Sing it"}
+            </Button>
+          )}
         </div>
+        {songUrl && (
+          <div className="space-y-2 rounded-xl bg-accent/30 px-3 py-3" data-testid="song-player">
+            <p className="text-sm font-semibold">🎵 Your song</p>
+            <audio controls autoPlay src={songUrl} className="w-full" />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => void onDownloadSong()}
+              disabled={busy !== null}
+            >
+              <Download className="mr-2 size-4" /> Save song
+            </Button>
+          </div>
+        )}
       </CardHeader>
       <CardContent className="space-y-5 text-lg">
-        <p className="whitespace-pre-line">{item.body}</p>
+        <p className={`whitespace-pre-line px-1 ${current === bodyIndex ? highlight : ""}`}>
+          {item.body}
+        </p>
         {item.steps.length > 0 && (
           <ol className="space-y-2">
             {item.steps.map((step, i) => (
-              <li key={i} className="flex gap-3 rounded-xl bg-secondary/60 px-4 py-3">
+              <li
+                key={i}
+                className={`flex gap-3 rounded-xl bg-secondary/60 px-4 py-3 transition-shadow ${
+                  current === stepStart + i ? highlight : ""
+                }`}
+              >
                 <span className="font-semibold text-primary">{i + 1}</span>
                 <span>{step}</span>
               </li>
@@ -40,7 +186,11 @@ export function MnemonicCard({
           </ol>
         )}
         {item.practiceTip && (
-          <p className="rounded-xl bg-accent/30 px-4 py-3 text-base">
+          <p
+            className={`rounded-xl bg-accent/30 px-4 py-3 text-base ${
+              current === tipIndex ? highlight : ""
+            }`}
+          >
             <span className="font-semibold">Practise: </span>
             {item.practiceTip}
           </p>

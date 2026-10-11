@@ -220,9 +220,58 @@ function SettingsPage() {
 
         <Card className="border-2">
           <CardHeader>
-            <CardTitle className="text-xl">Read-aloud</CardTitle>
+            <CardTitle className="text-xl">Listening</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
+            <label className="flex items-start justify-between gap-4">
+              <span>
+                <span className="block font-semibold">Audio-first mode</span>
+                <span className="block text-sm text-muted-foreground">
+                  Memory aids and quiz questions play by themselves as soon as they appear.
+                </span>
+              </span>
+              <Switch
+                checked={settings.audioFirst}
+                onCheckedChange={(checked) => update({ audioFirst: checked })}
+                aria-label="Audio-first mode"
+              />
+            </label>
+            <label className="flex items-start justify-between gap-4">
+              <span>
+                <span className="block font-semibold">Natural voice</span>
+                <span className="block text-sm text-muted-foreground">
+                  A warm, human-sounding voice. Turn off to use this device's own voice, which
+                  also works offline.
+                </span>
+              </span>
+              <Switch
+                checked={settings.voice === "natural"}
+                onCheckedChange={(checked) => update({ voice: checked ? "natural" : "device" })}
+                aria-label="Natural voice"
+              />
+            </label>
+            {settings.voice === "natural" && (
+              <div className="space-y-2">
+                <p className="font-semibold">Which voice?</p>
+                <div className="flex flex-wrap gap-2">
+                  {(
+                    [
+                      ["warm", "Calm and warm"],
+                      ["bright", "Bright and lively"],
+                    ] as const
+                  ).map(([id, label]) => (
+                    <Button
+                      key={id}
+                      type="button"
+                      variant={settings.naturalVoice === id ? "default" : "outline"}
+                      onClick={() => update({ naturalVoice: id })}
+                    >
+                      {label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            )}
             <Control
               label={`Playback speed (${settings.speechRate.toFixed(2)}x)`}
               value={settings.speechRate * 100}
@@ -231,7 +280,7 @@ function SettingsPage() {
               step={5}
               onChange={(value) => update({ speechRate: value / 100 })}
             />
-            <ReadAloud text={SAMPLE} label="Try this speed" />
+            <ReadAloud text={SAMPLE} label="Try this voice and speed" />
           </CardContent>
         </Card>
 

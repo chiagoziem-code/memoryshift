@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BrainCircuit,
   CalendarClock,
@@ -15,7 +15,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { AppNav } from "@/components/AppNav";
-import { MnemonicCard } from "@/components/MnemonicCard";
+import { MnemonicCard, mnemonicParts } from "@/components/MnemonicCard";
+import { useA11y } from "@/lib/a11y";
+import { Headphones, Pause, Play, SkipForward } from "lucide-react";
 import { ReadAloud } from "@/components/ReadAloud";
 import { RecallQuiz, scoreMessage } from "@/components/RecallQuiz";
 import { Switch } from "@/components/ui/switch";
@@ -681,6 +683,15 @@ function StudyFlow({
   }
 
   const plain = check?.arm === "plain";
+  const [active, setActive] = useState<{ index: number; part: number } | null>(null);
+  const { settings, speak } = useA11y();
+  const readPlain = useRef(false);
+  useEffect(() => {
+    if (plain && phase === "study" && settings.audioFirst && !readPlain.current && material) {
+      readPlain.current = true;
+      void speak(material);
+    }
+  }, [plain, phase, settings.audioFirst, material, speak]);
   const now = check ? attemptFor(check, "now") : null;
 
   return (
@@ -724,8 +735,18 @@ function StudyFlow({
       ) : (
         <>
           <h2 className="text-2xl font-semibold">Your memory aids</h2>
-          {results.map((item) => (
-            <MnemonicCard key={item.id} item={item} onFeedback={(liked) => onFeedback(item, liked)} />
+          <ListenAll
+            items={results}
+            autoStart={phase === "study"}
+            onActive={setActive}
+          />
+          {results.map((item, i) => (
+            <MnemonicCard
+              key={item.id}
+              item={item}
+              onFeedback={(liked) => onFeedback(item, liked)}
+              activePart={active?.index === i ? active.part : -1}
+            />
           ))}
         </>
       )}
@@ -751,5 +772,102 @@ function StudyFlow({
         </Card>
       )}
     </section>
+  );
+}
+
+/**
+ * Listening mode: plays every memory aid in order, lighting up the line being read.
+ * Starts by itself when audio-first is on.
+ */
+function ListenAll({
+  items,
+  autoStart,
+  onActive,
+}: {
+  items: SavedMnemonic[];
+  autoStart: boolean;
+  onActive: (active: { index: number; part: number } | null) => void;
+}) {
+  const { settings, speakParts, stopSpeaking, loadingVoice } = useA11y();
+  const [index, setIndex] = useState<number | null>(null);
+  const runId = useRef(0);
+  const started = useRef(false);
+
+  async function playFrom(start: number) {
+    const myRun = ++runId.current;
+    for (let i = start; i < items.length; i++) {
+      if (myRun !== runId.current) return;
+      setIndex(i);
+      let finished = false;
+      await speakParts(mnemonicParts(items[i]!), (part) => {
+        if (part === -1) finished = true;
+        else onActive({ index: i, part });
+      });
+      if (!finished || myRun !== runId.current) return;
+    }
+    if (myRun === runId.current) {
+      setIndex(null);
+      onActive(null);
+    }
+  }
+
+  function stop() {
+    runId.current++;
+    stopSpeaking();
+    setIndex(null);
+    onActive(null);
+  }
+
+  useEffect(() => {
+    if (autoStart && settings.audioFirst && items.length > 0 && !started.current) {
+      started.current = true;
+      void playFrom(0);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart, settings.audioFirst, items.length]);
+
+  useEffect(() => () => {
+    runId.current++;
+  }, []);
+
+  const playing = index !== null;
+  const current = playing ? items[index] : null;
+
+  return (
+    <Card className="sticky top-20 z-30 border-2 border-primary/50 shadow-md md:static" data-testid="listen-all">
+      <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-6">
+        <div className="flex items-center gap-3">
+          <Headphones className="size-6 text-primary" />
+          <div>
+            <p className="font-semibold">
+              {playing ? `Playing ${index + 1} of ${items.length}` : "Listen to all of them"}
+            </p>
+            {current && (
+              <p className="text-sm text-muted-foreground">
+                {loadingVoice ? "Getting the voice ready…" : formatById(current.format).name}
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="flex gap-2">
+          {playing ? (
+            <>
+              <Button size="lg" variant="outline" onClick={stop} aria-label="Pause">
+                <Pause className="mr-2 size-5" /> Pause
+              </Button>
+              {index < items.length - 1 && (
+                <Button size="lg" variant="outline" onClick={() => void playFrom(index + 1)} aria-label="Next">
+                  <SkipForward className="size-5" />
+                </Button>
+              )}
+            </>
+          ) : (
+            <Button size="lg" onClick={() => void playFrom(0)}>
+              <Play className="mr-2 size-5" /> Play all
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
