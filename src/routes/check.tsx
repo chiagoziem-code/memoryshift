@@ -21,6 +21,7 @@ import {
   type RecallCheck,
   type RecallStage,
 } from "@/lib/recall";
+import { loadActiveLearner, syncCheckInBackground, type Learner } from "@/lib/sync";
 
 export const Route = createFileRoute("/check")({
   head: () => ({
@@ -40,11 +41,20 @@ function CheckPage() {
   const [active, setActive] = useState<RecallCheck | null>(null);
   const [lastResult, setLastResult] = useState<{ correct: number; total: number } | null>(null);
 
-  useEffect(() => setChecks(loadChecks()), []);
+  const [learner, setLearner] = useState<Learner | null>(null);
+
+  useEffect(() => {
+    const active = loadActiveLearner();
+    setLearner(active);
+    setChecks(
+      loadChecks().filter((c) => !active || !c.learnerId || c.learnerId === active.id),
+    );
+  }, []);
 
   function finish(check: RecallCheck, answers: number[]) {
     const next = addAttempt(check, "nextDay", answers);
     upsertCheck(next);
+    syncCheckInBackground(next);
     const attempt = attemptFor(next, "nextDay")!;
     if (next.arm === "plain" && next.heldBack?.length) {
       saveLibrary([...next.heldBack, ...loadLibrary()]);
@@ -53,7 +63,9 @@ function CheckPage() {
     }
     setLastResult({ correct: attempt.correct, total: attempt.total });
     setActive(null);
-    setChecks(loadChecks());
+    setChecks(
+      loadChecks().filter((c) => !learner || !c.learnerId || c.learnerId === learner.id),
+    );
   }
 
   if (checks === null) return <div className="min-h-screen"><AppNav /></div>;
@@ -71,6 +83,22 @@ function CheckPage() {
           <p className="text-lg text-muted-foreground">
             The next-day check shows what really stuck. Same questions, one day later.
           </p>
+          {learner ? (
+            <p className="text-base">
+              Learner: <span className="font-semibold">{learner.nickname}</span>.{" "}
+              <Link to="/account" className="underline">
+                Switch
+              </Link>
+            </p>
+          ) : (
+            <p className="rounded-2xl border-2 border-accent bg-accent/25 px-5 py-4 text-base">
+              Part of the pilot?{" "}
+              <Link to="/account" className="font-semibold underline">
+                Parents, sign in here
+              </Link>{" "}
+              so results are saved safely.
+            </p>
+          )}
         </div>
 
         {active ? (

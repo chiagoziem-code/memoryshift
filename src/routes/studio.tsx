@@ -40,6 +40,7 @@ import {
   type RecallCheck,
   type RecallStage,
 } from "@/lib/recall";
+import { loadActiveLearner, syncCheckInBackground } from "@/lib/sync";
 import {
   FORMATS,
   formatById,
@@ -140,6 +141,7 @@ function Studio() {
     const next = addAttempt(check, stage, answers);
     setCheck(next);
     upsertCheck(next);
+    syncCheckInBackground(next);
     setPhase(stage === "before" ? "study" : "done");
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -297,18 +299,22 @@ function Studio() {
       setResults(created);
 
       if (recall.questions.length > 0) {
+        const activeLearner = loadActiveLearner();
         const arm = loadPilot() ? pickArm(loadChecks()) : "aids";
         const newCheck: RecallCheck = {
           setId,
           subject: output?.subject ?? "My material",
           material: text,
           arm,
+          formats: created.map((c) => c.format),
+          ...(activeLearner ? { learnerId: activeLearner.id } : {}),
           questions: recall.questions,
           attempts: [],
           createdAt: new Date().toISOString(),
           ...(arm === "plain" ? { heldBack: created } : {}),
         };
         upsertCheck(newCheck);
+        syncCheckInBackground(newCheck);
         setCheck(newCheck);
         // Plain-notes sets get their memory aids after the next-day check.
         if (arm === "aids") saveLibrary([...created, ...loadLibrary()]);

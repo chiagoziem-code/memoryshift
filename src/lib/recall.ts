@@ -32,6 +32,10 @@ export type RecallCheck = {
   subject: string;
   material: string;
   arm: StudyArm;
+  /** Memory-aid formats made for this topic. */
+  formats?: string[];
+  /** Learner (from a parent account) this check belongs to, if any. */
+  learnerId?: string;
   questions: RecallQuestion[];
   attempts: RecallAttempt[];
   createdAt: string;

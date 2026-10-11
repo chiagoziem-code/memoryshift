@@ -13,6 +13,7 @@ const links = [
   { to: "/onboarding", label: "Calibration" },
   { to: "/profile", label: "My profile" },
   { to: "/settings", label: "Reading & access" },
+  { to: "/account", label: "Parents" },
 ] as const;
 
 export function AppNav() {
