@@ -1,4 +1,5 @@
 import { ThumbsDown, ThumbsUp } from "lucide-react";
+import { ReadAloud } from "@/components/ReadAloud";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatById, type SavedMnemonic } from "@/lib/mnemonics";
@@ -19,6 +20,12 @@ export function MnemonicCard({
           {format.name}
         </div>
         <CardTitle className="text-2xl">{item.title}</CardTitle>
+        <div>
+          <ReadAloud
+            text={[item.title, item.body, ...item.steps, item.practiceTip].filter(Boolean).join(". ")}
+            size="default"
+          />
+        </div>
       </CardHeader>
       <CardContent className="space-y-5 text-lg">
         <p className="whitespace-pre-line">{item.body}</p>

@@ -1,16 +1,45 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
-import { FileText, Image as ImageIcon, Loader2, Mic, Sigma, Sparkles, Video, X } from "lucide-react";
+import {
+  BrainCircuit,
+  CalendarClock,
+  FileText,
+  Image as ImageIcon,
+  Loader2,
+  Mic,
+  Sigma,
+  Sparkles,
+  Video,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import { AppNav } from "@/components/AppNav";
 import { MnemonicCard } from "@/components/MnemonicCard";
+import { ReadAloud } from "@/components/ReadAloud";
+import { RecallQuiz, scoreMessage } from "@/components/RecallQuiz";
+import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { generateMnemonics, readImageText, transcribeMedia } from "@/lib/mnemonics.functions";
+import {
+  generateMnemonics,
+  makeRecallQuestions,
+  readImageText,
+  transcribeMedia,
+} from "@/lib/mnemonics.functions";
+import {
+  addAttempt,
+  attemptFor,
+  loadChecks,
+  loadPilot,
+  pickArm,
+  upsertCheck,
+  type RecallCheck,
+  type RecallStage,
+} from "@/lib/recall";
 import {
   FORMATS,
   formatById,
@@ -88,6 +117,7 @@ function Studio() {
   const generate = useServerFn(generateMnemonics);
   const transcribe = useServerFn(transcribeMedia);
   const readPictures = useServerFn(readImageText);
+  const makeQuestions = useServerFn(makeRecallQuestions);
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [text, setText] = useState("");
@@ -99,6 +129,20 @@ function Studio() {
 
   const [selected, setSelected] = useState<FormatId[]>([]);
   const [results, setResults] = useState<SavedMnemonic[]>([]);
+
+  /** Memory check flow: quiz before studying, study, quiz right after. */
+  const [checkOn, setCheckOn] = useState(true);
+  const [check, setCheck] = useState<RecallCheck | null>(null);
+  const [phase, setPhase] = useState<"edit" | "before" | "study" | "now" | "done">("edit");
+
+  function finishStage(stage: RecallStage, answers: number[]) {
+    if (!check) return;
+    const next = addAttempt(check, stage, answers);
+    setCheck(next);
+    upsertCheck(next);
+    setPhase(stage === "before" ? "study" : "done");
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 
   useEffect(() => {
     const loaded = loadProfile();
@@ -217,15 +261,21 @@ function Studio() {
       ]
         .filter(Boolean)
         .join(" ");
-      const output = await generate({
-        data: {
-          text,
-          notes: inputHints,
-          formats: selected,
-          readingLevel: profile?.readingLevel ?? "simple",
-          images: images.map(({ mediaType, dataUrl }) => ({ mediaType, dataUrl })),
-        },
-      });
+      const imageData = images.map(({ mediaType, dataUrl }) => ({ mediaType, dataUrl }));
+      const [output, recall] = await Promise.all([
+        generate({
+          data: {
+            text,
+            notes: inputHints,
+            formats: selected,
+            readingLevel: profile?.readingLevel ?? "simple",
+            images: imageData,
+          },
+        }),
+        checkOn
+          ? makeQuestions({ data: { text, images: imageData } }).catch(() => ({ questions: [] }))
+          : Promise.resolve({ questions: [] }),
+      ]);
 
       const setId = `set-${Date.now()}`;
       const created: SavedMnemonic[] = (output?.items ?? []).map((item, i) => ({
@@ -245,7 +295,30 @@ function Studio() {
         reviews: 0,
       }));
       setResults(created);
-      saveLibrary([...created, ...loadLibrary()]);
+
+      if (recall.questions.length > 0) {
+        const arm = loadPilot() ? pickArm(loadChecks()) : "aids";
+        const newCheck: RecallCheck = {
+          setId,
+          subject: output?.subject ?? "My material",
+          material: text,
+          arm,
+          questions: recall.questions,
+          attempts: [],
+          createdAt: new Date().toISOString(),
+          ...(arm === "plain" ? { heldBack: created } : {}),
+        };
+        upsertCheck(newCheck);
+        setCheck(newCheck);
+        // Plain-notes sets get their memory aids after the next-day check.
+        if (arm === "aids") saveLibrary([...created, ...loadLibrary()]);
+        setPhase("before");
+      } else {
+        setCheck(null);
+        saveLibrary([...created, ...loadLibrary()]);
+        setPhase("study");
+      }
+      if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Something went wrong making your memory aids",
@@ -294,6 +367,29 @@ function Studio() {
           )}
         </div>
 
+        {phase !== "edit" && (
+          <StudyFlow
+            phase={phase}
+            check={check}
+            results={results}
+            material={text}
+            onFinish={finishStage}
+            onCheckNow={() => setPhase("now")}
+            onFeedback={onFeedback}
+            onStartOver={() => {
+              setPhase("edit");
+              setResults([]);
+              setCheck(null);
+              setText("");
+              setImages([]);
+              setMediaLabels([]);
+              setNotes("");
+            }}
+          />
+        )}
+
+        {phase === "edit" && (
+        <>
         <Card className="border-2">
           <CardHeader>
             <CardTitle className="text-xl">1. What are you learning?</CardTitle>
@@ -462,6 +558,18 @@ function Studio() {
               </div>
             </div>
             <p className="text-sm text-muted-foreground">Pick up to 4 at a time.</p>
+            <label className="flex items-start justify-between gap-4 rounded-2xl border-2 border-border bg-card px-4 py-4">
+              <span>
+                <span className="flex items-center gap-2 text-base font-semibold">
+                  <BrainCircuit className="size-5 text-primary" /> Memory check
+                </span>
+                <span className="mt-1 block text-sm text-muted-foreground">
+                  4 quick questions before and after, then again tomorrow, so you can see
+                  what sticks.
+                </span>
+              </span>
+              <Switch checked={checkOn} onCheckedChange={setCheckOn} aria-label="Memory check" />
+            </label>
             <Button
               size="lg"
               className="w-full text-lg"
@@ -481,17 +589,7 @@ function Studio() {
           </CardContent>
         </Card>
 
-        {results.length > 0 && (
-          <section className="space-y-5">
-            <h2 className="text-2xl font-semibold">Your memory aids</h2>
-            {results.map((item) => (
-              <MnemonicCard
-                key={item.id}
-                item={item}
-                onFeedback={(liked) => onFeedback(item, liked)}
-              />
-            ))}
-          </section>
+        </>
         )}
       </main>
     </div>
@@ -531,5 +629,121 @@ function FormatButton({
       </span>
       <span className="mt-1 block text-sm text-muted-foreground">{format.tagline}</span>
     </button>
+  );
+}
+
+function StudyFlow({
+  phase,
+  check,
+  results,
+  material,
+  onFinish,
+  onCheckNow,
+  onFeedback,
+  onStartOver,
+}: {
+  phase: "before" | "study" | "now" | "done" | "edit";
+  check: RecallCheck | null;
+  results: SavedMnemonic[];
+  material: string;
+  onFinish: (stage: RecallStage, answers: number[]) => void;
+  onCheckNow: () => void;
+  onFeedback: (item: SavedMnemonic, liked: boolean) => void;
+  onStartOver: () => void;
+}) {
+  if (phase === "before" && check) {
+    return (
+      <RecallQuiz
+        key="before"
+        title="Before you start"
+        intro={"What do you already know? It's fine to say \"I don't know yet\". Most people don't!"}
+        questions={check.questions}
+        onDone={(answers) => onFinish("before", answers)}
+      />
+    );
+  }
+  if (phase === "now" && check) {
+    return (
+      <RecallQuiz
+        key="now"
+        title="Check yourself"
+        intro="Same questions as before. Let's see what stuck."
+        questions={check.questions}
+        onDone={(answers) => onFinish("now", answers)}
+      />
+    );
+  }
+
+  const plain = check?.arm === "plain";
+  const now = check ? attemptFor(check, "now") : null;
+
+  return (
+    <section className="space-y-5">
+      {phase === "done" && now && (
+        <Card className="border-2 border-primary/50" data-testid="check-result">
+          <CardContent className="space-y-3 pt-6 text-lg">
+            <p className="text-2xl font-semibold">{scoreMessage(now.correct, now.total)}</p>
+            <p className="flex items-start gap-2 text-base text-muted-foreground">
+              <CalendarClock className="mt-1 size-5 shrink-0" />
+              Come back tomorrow for your next-day check. That's the one that shows what
+              really stuck.
+            </p>
+            <div className="flex flex-wrap gap-3 pt-1">
+              <Button asChild size="lg">
+                <Link to="/check">See my memory checks</Link>
+              </Button>
+              <Button size="lg" variant="outline" onClick={onStartOver}>
+                Learn something new
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {plain ? (
+        <Card className="border-2" data-testid="plain-notes">
+          <CardHeader className="gap-2">
+            <p className="text-sm font-semibold text-primary">Pilot study: plain notes</p>
+            <CardTitle className="text-2xl">Study your notes</CardTitle>
+            <p className="text-base text-muted-foreground">
+              This time you'll learn from your notes the usual way. Your memory aids for
+              this one unlock after tomorrow's check.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4 text-lg">
+            <ReadAloud text={material} />
+            <p className="whitespace-pre-line rounded-xl bg-secondary/60 px-4 py-3">{material}</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          <h2 className="text-2xl font-semibold">Your memory aids</h2>
+          {results.map((item) => (
+            <MnemonicCard key={item.id} item={item} onFeedback={(liked) => onFeedback(item, liked)} />
+          ))}
+        </>
+      )}
+
+      {phase === "study" && (
+        <Card className="border-2">
+          <CardContent className="flex flex-wrap items-center justify-between gap-4 pt-6">
+            <p className="text-lg">
+              {check
+                ? "Take your time. When you feel ready, check yourself."
+                : "Saved to your library."}
+            </p>
+            {check ? (
+              <Button size="lg" onClick={onCheckNow}>
+                <BrainCircuit className="mr-2 size-5" /> I'm ready, check me
+              </Button>
+            ) : (
+              <Button size="lg" variant="outline" onClick={onStartOver}>
+                Learn something new
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      )}
+    </section>
   );
 }

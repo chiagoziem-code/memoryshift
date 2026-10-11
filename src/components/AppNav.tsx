@@ -7,6 +7,7 @@ const links = [
   { to: "/studio", label: "Studio" },
   { to: "/library", label: "Library" },
   { to: "/review", label: "Review" },
+  { to: "/check", label: "Memory check" },
   { to: "/progress", label: "Progress" },
 
   { to: "/onboarding", label: "Calibration" },

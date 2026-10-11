@@ -168,3 +168,71 @@ export const transcribeMedia = createServerFn({ method: "POST" })
     const json = (await response.json()) as { text?: string };
     return { text: json.text ?? "" };
   });
+
+const RecallInput = z.object({
+  text: z.string().default(""),
+  images: z
+    .array(z.object({ mediaType: z.string(), dataUrl: z.string() }))
+    .max(3)
+    .default([]),
+});
+
+const RecallSchema = z.object({
+  questions: z
+    .array(
+      z.object({
+        question: z.string().describe("A short question in plain words, under 15 words"),
+        options: z
+          .array(z.string())
+          .describe("Exactly 3 short answer choices, each under 8 words"),
+        answerIndex: z.number().int().describe("0-based index of the correct option"),
+      }),
+    )
+    .describe("4 questions"),
+});
+
+/** Quick multiple-choice questions used to measure what a learner remembers. */
+export const makeRecallQuestions = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) => RecallInput.parse(input))
+  .handler(async ({ data }) => {
+    const parts: Array<
+      { type: "text"; text: string } | { type: "file"; mediaType: string; data: string }
+    > = [
+      {
+        type: "text",
+        text: [
+          "Material to learn:",
+          data.text || "(see attached image)",
+          "",
+          "Write 4 multiple-choice questions that check whether a learner remembers the key facts of this material.",
+          "Each question has exactly 3 options and one correct answer.",
+          "Test the facts themselves (names, order, numbers, meanings), never the memory aid.",
+          "Wrong options must be believable but clearly wrong to someone who learned the material.",
+          "Spread the correct answer position across the questions.",
+        ].join("\n"),
+      },
+    ];
+    for (const image of data.images) {
+      parts.push({ type: "file", mediaType: image.mediaType, data: image.dataUrl });
+    }
+
+    const result = streamText({
+      model: createResponsesModel(),
+      system:
+        "You write short recall questions for a dyslexic learner aged 9 to 14. Short sentences, common words, no trick questions, no 'all of the above'. Only use facts in the material.",
+      messages: [{ role: "user", content: parts }],
+      output: Output.object({ schema: RecallSchema }),
+      providerOptions: responsesProviderOptions,
+    });
+
+    const output = await result.output;
+    const questions = (output?.questions ?? [])
+      .filter(
+        (q) =>
+          q.options.length >= 2 && q.answerIndex >= 0 && q.answerIndex < q.options.length,
+      )
+      .slice(0, 4)
+      .map((q) => ({ ...q, options: q.options.slice(0, 3) }))
+      .filter((q) => q.answerIndex < q.options.length);
+    return { questions };
+  });

@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { CalendarClock, Flame, LineChart, Sparkles, TrendingUp } from "lucide-react";
 import { AppNav } from "@/components/AppNav";
+import { MemoryCheckSummary } from "@/components/MemoryCheckSummary";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress as ProgressBar } from "@/components/ui/progress";
@@ -183,6 +184,8 @@ function ProgressPage() {
             </Card>
           )}
         </section>
+
+        <MemoryCheckSummary />
 
         <section className="space-y-5">
           <h2 className="flex items-center gap-2 text-2xl font-semibold">

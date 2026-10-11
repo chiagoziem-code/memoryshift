@@ -129,11 +129,29 @@ export function scoreQuiz(answers: Record<string, number>): Record<FormatId, num
   return scores;
 }
 
+/**
+ * Small starting nudge towards picture, story, movement and sound formats.
+ * Dyslexia mostly affects working with letters and their sounds, so
+ * letter-based cues (acronyms) start lower. Quiz answers and likes outweigh this.
+ */
+export const FORMAT_PRIOR: Record<FormatId, number> = {
+  story: 2,
+  visual: 2,
+  movement: 1.5,
+  rhyme: 1,
+  sketch: 1,
+  palace: 0.5,
+  analogy: 0.5,
+  chunk: 0,
+  acronym: -1,
+};
+
 export function rankFormats(profile: Profile): FormatId[] {
   return FORMATS.map((f) => f.id)
     .map((id) => ({
       id,
       score:
+        FORMAT_PRIOR[id] +
         (profile.scores[id] ?? 0) +
         (profile.favourites.includes(id) ? 6 : 0) -
         (profile.avoided.includes(id) ? 10 : 0),
@@ -424,6 +442,8 @@ export const STORAGE_KEYS = {
   library: LIBRARY_KEY,
   reviews: REVIEWS_KEY,
   access: "memoryshift.a11y.v1",
+  recall: "memoryshift.recall.v1",
+  pilot: "memoryshift.pilot.v1",
 } as const;
 
 export type LearnerBackup = {
@@ -433,6 +453,7 @@ export type LearnerBackup = {
   library: unknown;
   reviews: unknown;
   access: unknown;
+  recall?: unknown;
 };
 
 export function exportLearnerData(): LearnerBackup {
@@ -451,6 +472,7 @@ export function exportLearnerData(): LearnerBackup {
     library: read(STORAGE_KEYS.library),
     reviews: read(STORAGE_KEYS.reviews),
     access: read(STORAGE_KEYS.access),
+    recall: read(STORAGE_KEYS.recall),
   };
 }
 
@@ -464,6 +486,7 @@ export function importLearnerData(backup: LearnerBackup) {
   write(STORAGE_KEYS.library, backup.library);
   write(STORAGE_KEYS.reviews, backup.reviews);
   write(STORAGE_KEYS.access, backup.access);
+  write(STORAGE_KEYS.recall, backup.recall);
 }
 
 export function clearLearnerData() {

@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Download, RotateCcw, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { AppNav } from "@/components/AppNav";
@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
+import { loadPilot, savePilot } from "@/lib/recall";
 import { FONT_STACKS, useA11y, type ContrastChoice, type FontChoice } from "@/lib/a11y";
 import {
   clearLearnerData,
@@ -234,6 +235,8 @@ function SettingsPage() {
           </CardContent>
         </Card>
 
+        <PilotCard />
+
         <Card className="border-2">
           <CardHeader>
             <CardTitle className="text-xl">Your saved learning</CardTitle>
@@ -321,5 +324,36 @@ function Toggle({
       </Label>
       <Switch id={id} checked={checked} onCheckedChange={onChange} />
     </div>
+  );
+}
+
+function PilotCard() {
+  const [on, setOn] = useState(false);
+  useEffect(() => setOn(loadPilot()), []);
+  return (
+    <Card className="border-2">
+      <CardHeader>
+        <CardTitle className="text-xl">Pilot study mode</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 text-base">
+        <div className="flex items-start justify-between gap-4">
+          <p className="text-muted-foreground">
+            For parents and teachers running a fair test. Each new topic is studied either with
+            memory aids or as plain notes, half and half. The memory-check scores then show
+            whether the memory aids made a difference. Plain-notes topics get their memory aids
+            after the next-day check.
+          </p>
+          <Switch
+            checked={on}
+            aria-label="Pilot study mode"
+            onCheckedChange={(value) => {
+              setOn(value);
+              savePilot(value);
+              toast.success(value ? "Pilot study mode is on" : "Pilot study mode is off");
+            }}
+          />
+        </div>
+      </CardContent>
+    </Card>
   );
 }
