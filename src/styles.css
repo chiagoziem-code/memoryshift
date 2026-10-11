@@ -170,6 +170,13 @@
     line-height: var(--app-line-height, 1.7);
   }
 
+  /* Room for the bottom tab bar on phones. */
+  @media (max-width: 767px) {
+    body {
+      padding-bottom: calc(5rem + env(safe-area-inset-bottom));
+    }
+  }
+
   h1,
   h2,
   h3 {

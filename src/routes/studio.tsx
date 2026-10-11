@@ -538,7 +538,7 @@ function Studio() {
           <CardContent className="space-y-6">
             <div className="space-y-3">
               <p className="font-semibold">Matched to you</p>
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {recommended.map((id) => (
                   <FormatButton
                     key={id}
@@ -552,7 +552,7 @@ function Studio() {
             </div>
             <div className="space-y-3">
               <p className="font-semibold">Other options</p>
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {others.map((id) => (
                   <FormatButton
                     key={id}
@@ -619,7 +619,7 @@ function FormatButton({
       type="button"
       onClick={onClick}
       aria-pressed={selected}
-      className={`rounded-2xl border-2 px-4 py-4 text-left transition-colors ${
+      className={`rounded-2xl border-2 px-3 py-3 text-left transition-colors sm:px-4 sm:py-4 ${
         selected
           ? "border-primary bg-primary/10"
           : highlight
@@ -633,7 +633,7 @@ function FormatButton({
         </span>
         {format.name}
       </span>
-      <span className="mt-1 block text-sm text-muted-foreground">{format.tagline}</span>
+      <span className="mt-1 hidden text-sm sm:block text-muted-foreground">{format.tagline}</span>
     </button>
   );
 }
