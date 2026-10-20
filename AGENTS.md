@@ -9,4 +9,4 @@
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
 
-- Pre-made memory songs are generated once and shipped as static MP3s in public/music (data in src/lib/songs.ts); why: learners play them instantly with no per-play AI cost.
+- Memory songs are composed per learner on an explicit Compose press and kept in on-device IndexedDB keyed by lyrics (src/lib/audio.ts); why: replay in Music, Review and Studio never pays for a second generation.
