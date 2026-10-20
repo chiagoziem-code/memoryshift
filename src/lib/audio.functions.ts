@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { SONG_STYLE_IDS, isLongSong, songStyleById } from "@/lib/song-styles";
 
 /**
  * Natural-voice speech and sung rhymes through the Lovable AI gateway.
@@ -9,7 +10,9 @@ import { z } from "zod";
 
 const GATEWAY = "https://ai.gateway.lovable.dev/v1";
 const TTS_MODEL = "google/gemini-2.5-flash-tts";
+/** 30-second clips for short rhymes; full-length tracks so long rhymes fit. */
 const MUSIC_MODEL = "google/lyria-3-clip-preview";
+const MUSIC_MODEL_LONG = "google/lyria-3-pro-preview";
 
 /** Two friendly Gemini prebuilt voices. */
 const VOICES = { warm: "Sulafat", bright: "Puck" } as const;
@@ -163,15 +166,23 @@ export const speakText = createServerFn({ method: "POST" })
 const SingInput = z.object({
   lyrics: z.string().min(1).max(600),
   title: z.string().max(120).optional(),
+  style: z.enum(SONG_STYLE_IDS).optional(),
 });
 
 export const singRhyme = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => SingInput.parse(input))
   .handler(async ({ data }) => {
     const key = gatewayKey();
+    const long = isLongSong(data.lyrics);
+    const style = data.style
+      ? songStyleById(data.style).prompt
+      : "A cheerful, simple, catchy children's song at a slow tempo with light acoustic backing";
     const prompt = [
-      "A cheerful, simple, catchy children's song at a slow tempo with light acoustic backing.",
-      "Clear, friendly sung vocals that sing these exact lyrics so every word is easy to hear. Do not add other words.",
+      `${style}.`,
+      "Clear, friendly, slowly sung vocals that sing these exact lyrics so every word is easy to hear, in English. Do not add other words.",
+      long
+        ? "Sing every line once, then repeat the lyrics as a chorus. Around 60 to 90 seconds long."
+        : "Sing every line, then repeat them once if there is time.",
       data.title ? `Song title: ${data.title}` : "",
       "Lyrics:",
       data.lyrics,
@@ -183,7 +194,7 @@ export const singRhyme = createServerFn({ method: "POST" })
       method: "POST",
       headers: headers(key),
       body: JSON.stringify({
-        model: MUSIC_MODEL,
+        model: long ? MUSIC_MODEL_LONG : MUSIC_MODEL,
         input: [{ type: "user_input", content: [{ type: "text", text: prompt }] }],
       }),
     });
