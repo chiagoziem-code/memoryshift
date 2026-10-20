@@ -18,7 +18,7 @@ export function mnemonicParts(item: SavedMnemonic) {
 }
 
 /** Lyrics for the sung version: the rhyme itself, plus its lines if the body is short. */
-function lyricsFor(item: SavedMnemonic) {
+export function lyricsFor(item: SavedMnemonic) {
   const body = item.body.trim();
   return body.length >= 60 ? body : [body, ...item.steps].join("\n");
 }

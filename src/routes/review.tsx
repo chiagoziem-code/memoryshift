@@ -4,6 +4,7 @@ import { CheckCircle2, ChevronRight, Minus, RotateCcw, X } from "lucide-react";
 import { toast } from "sonner";
 import { AppNav } from "@/components/AppNav";
 import { ReadAloud } from "@/components/ReadAloud";
+import { SavedSongPlayer } from "@/components/SavedSongPlayer";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -261,6 +262,7 @@ function ReviewPage() {
                       </p>
                     )}
                     <ReadAloud text={itemText(current)} />
+                    <SavedSongPlayer item={current} />
                     <div className="space-y-3 pt-2">
                       <p className="text-lg font-semibold">How did that feel?</p>
                       <div className="grid gap-3 sm:grid-cols-3">
