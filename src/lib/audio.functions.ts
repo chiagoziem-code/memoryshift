@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { Output, streamText } from "ai";
 import { z } from "zod";
+import { captureStreamErrors } from "./ai-errors";
 import { createResponsesModel, responsesProviderOptions } from "./ai-gateway.server";
 import { localeGuide } from "./locale";
 import { SONG_STYLE_IDS, isLongSong, songStyleById } from "@/lib/song-styles";
@@ -352,7 +353,9 @@ async function fitLyricsTo(facts: string, tune: TuneId, accent: Accent) {
       : tune.startsWith("classic:")
         ? `Rewrite the facts as new lyrics that fit the rhythm and syllable count of the traditional song "${TUNES[tune].label}", line by line, so they can be sung to that melody. Do not reuse the original words.`
         : `Write lyrics for ${TUNES[tune].label.toLowerCase()} style: 4 to 8 short lines with a simple rhyme and a repeating hook.`;
-  const result = streamText({
+  const errs = captureStreamErrors();
+    const result = streamText({
+      onError: errs.onError,
     model: createResponsesModel(),
     system:
       `You write memory songs for a dyslexic learner aged 9 to 14. Keep every fact exactly right and in order. Never add facts. Common words, short lines, easy to sing. The whole song must be under 30 seconds. ${localeGuide(accent)}`,
@@ -360,7 +363,9 @@ async function fitLyricsTo(facts: string, tune: TuneId, accent: Accent) {
     output: Output.object({ schema: LyricsSchema }),
     providerOptions: responsesProviderOptions,
   });
-  const output = await result.output;
+  const output = await Promise.resolve(result.output).catch((e: unknown) => {
+      throw errs.explain(e);
+    });
   const lines = (output?.lines ?? []).map((l) => l.trim()).filter(Boolean).slice(0, 8);
   if (lines.length === 0) throw new Error("Song failed: no lyrics came back");
   return lines;

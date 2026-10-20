@@ -27,7 +27,7 @@ export function createResponsesModel() {
   if (!key) throw new Error("Missing LOVABLE_API_KEY");
   const runIdFetch = createLovableAiGatewayRunIdFetch();
   const lovable = createOpenAI({
-    baseURL: "https://ai.gateway.lovable.dev/v1",
+    baseURL: process.env["AI_GATEWAY_URL"] ?? "https://ai.gateway.lovable.dev/v1",
     apiKey: key,
     headers: { "Lovable-API-Key": key, "X-Lovable-AIG-SDK": "vercel-ai-sdk" },
     fetch: runIdFetch.fetch,

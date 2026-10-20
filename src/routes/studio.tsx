@@ -7,6 +7,7 @@ import {
   FileText,
   FileUp,
   Globe2,
+  OctagonX,
   Image as ImageIcon,
   Loader2,
   Mic,
@@ -47,6 +48,7 @@ import {
 } from "@/lib/recall";
 import { loadActiveLearner, syncCheckInBackground } from "@/lib/sync";
 import { LOCALE_OPTIONS } from "@/lib/locale";
+import { formatBytes, shrinkImage } from "@/lib/images";
 import { DOCUMENT_ACCEPT, MAX_DOC_CHARS, documentKind, readLocalDocument } from "@/lib/documents";
 import {
   FORMATS,
@@ -86,6 +88,8 @@ export const Route = createFileRoute("/studio")({
 type Attachment = { name: string; mediaType: string; dataUrl: string };
 
 const MAX_BYTES = 8 * 1024 * 1024;
+/** Photos are shrunk on the phone first, so larger originals are fine. */
+const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 
 function readFile(file: File) {
   return new Promise<string>((resolve, reject) => {
@@ -134,7 +138,35 @@ function Studio() {
   const [notes, setNotes] = useState("");
   const [images, setImages] = useState<Attachment[]>([]);
   const [mediaLabels, setMediaLabels] = useState<string[]>([]);
-  const [readingDocs, setReadingDocs] = useState(false);
+  /** What is happening right now, so the learner sees progress and can stop it. */
+  const [job, setJob] = useState<{ label: string; startedAt: number } | null>(null);
+  const jobAbort = useRef<AbortController | null>(null);
+
+  function beginJob(label: string) {
+    jobAbort.current?.abort();
+    const controller = new AbortController();
+    jobAbort.current = controller;
+    setJob({ label, startedAt: Date.now() });
+    return controller.signal;
+  }
+  function jobStage(label: string) {
+    setJob((current) => (current ? { ...current, label } : current));
+  }
+  function endJob(signal: AbortSignal) {
+    if (jobAbort.current?.signal === signal) {
+      jobAbort.current = null;
+      setJob(null);
+      setBusy("idle");
+    }
+  }
+  function stopJob() {
+    jobAbort.current?.abort();
+    jobAbort.current = null;
+    setJob(null);
+    setBusy("idle");
+    toast.message("Stopped. Nothing new was added.");
+  }
+  const stopped = (signal: AbortSignal) => signal.aborted;
   const [isFormula, setIsFormula] = useState(false);
   const [busy, setBusy] = useState<"idle" | "transcribing" | "generating">("idle");
 
@@ -178,33 +210,50 @@ function Studio() {
 
   async function onImages(files: FileList | null) {
     if (!files) return;
-    const picked: Attachment[] = [];
-    for (const file of Array.from(files).slice(0, 3)) {
-      if (file.size > MAX_BYTES) {
-        toast.error(`${file.name} is too large (8 MB max)`);
-        continue;
-      }
-      picked.push({ name: file.name, mediaType: file.type, dataUrl: await readFile(file) });
-    }
-    setImages((current) => [...current, ...picked].slice(0, 3));
-    if (picked.length === 0) return;
+    const chosen = Array.from(files).slice(0, 3);
+    if (chosen.length === 0) return;
     setBusy("transcribing");
+    const signal = beginJob(chosen.length > 1 ? "Shrinking your photos…" : "Shrinking your photo…");
     try {
+      const picked: Attachment[] = [];
+      let before = 0;
+      let after = 0;
+      for (const file of chosen) {
+        if (file.size > MAX_IMAGE_BYTES) {
+          toast.error(`${file.name} is too large (25 MB max)`);
+          continue;
+        }
+        const small = await shrinkImage(file);
+        if (stopped(signal)) return;
+        before += small.before;
+        after += small.after;
+        picked.push({ name: file.name, mediaType: small.mediaType, dataUrl: small.dataUrl });
+      }
+      if (picked.length === 0) return;
+      setImages((current) => [...current, ...picked].slice(0, 3));
+      jobStage(
+        after < before
+          ? `Reading the words (sending ${formatBytes(after)} instead of ${formatBytes(before)})…`
+          : "Reading the words in your picture…",
+      );
       const { text: words } = await readPictures({
         data: {
           isFormula,
           images: picked.map(({ mediaType, dataUrl }) => ({ mediaType, dataUrl })),
         },
+        signal,
       });
+      if (stopped(signal)) return;
       if (words.trim()) {
         setText((current) => (current ? `${current}\n\n${words}` : words));
         setMediaLabels((current) => [...current, ...picked.map((p) => p.name)]);
-        toast.success("Picture words written out — check them below");
+        toast.success("Picture words written out. Check them below.");
       }
     } catch (error) {
+      if (stopped(signal)) return;
       toast.error(error instanceof Error ? `We couldn't read that picture. ${error.message}` : "We couldn't read that picture.");
     } finally {
-      setBusy("idle");
+      endJob(signal);
     }
   }
 
@@ -212,20 +261,28 @@ function Studio() {
     const picked = Array.from(files ?? []).slice(0, 3);
     if (picked.length === 0) return;
     setBusy("transcribing");
-    setReadingDocs(true);
+    const signal = beginJob("Opening your document…");
     try {
       for (const file of picked) {
+        if (stopped(signal)) return;
         if (file.size > MAX_BYTES) {
           toast.error(`${file.name} is too large (8 MB max)`);
           continue;
         }
         let words = "";
         try {
-          words =
-            documentKind(file) === "pdf"
-              ? (await readPdf({ data: { dataUrl: await readFile(file), fileName: file.name } })).text
-              : await readLocalDocument(file);
+          if (documentKind(file) === "pdf") {
+            jobStage(`Sending ${file.name} (${formatBytes(file.size)}) to be read…`);
+            words = (
+              await readPdf({ data: { dataUrl: await readFile(file), fileName: file.name }, signal })
+            ).text;
+          } else {
+            jobStage(`Reading ${file.name}…`);
+            words = await readLocalDocument(file);
+          }
+          if (stopped(signal)) return;
         } catch (error) {
+          if (stopped(signal)) return;
           toast.error(
             error instanceof Error
               ? `We couldn't read ${file.name}. ${error.message}`
@@ -247,8 +304,7 @@ function Studio() {
         toast.success(`Words added from ${file.name}. Check them below.`);
       }
     } finally {
-      setReadingDocs(false);
-      setBusy("idle");
+      endJob(signal);
     }
   }
 
@@ -256,8 +312,10 @@ function Studio() {
     const picked = Array.from(files ?? []).slice(0, 3);
     if (picked.length === 0) return;
     setBusy("transcribing");
+    const signal = beginJob("Getting your recording ready…");
     try {
       for (const file of picked) {
+        if (stopped(signal)) return;
         if (file.size > MAX_BYTES) {
           toast.error(`${file.name} is too large (8 MB max)`);
           continue;
@@ -266,15 +324,20 @@ function Studio() {
         let mediaType = file.type || "audio/mpeg";
         let fileName = file.name;
         if (mediaType.startsWith("video/")) {
+          jobStage(`Taking the sound out of ${file.name}…`);
           dataUrl = await videoToWavDataUrl(file);
           mediaType = "audio/wav";
           fileName = file.name.replace(/\.[^.]+$/, "") + ".wav";
         } else {
           dataUrl = await readFile(file);
         }
+        if (stopped(signal)) return;
+        jobStage(`Listening to ${file.name}…`);
         const { text: transcript } = await transcribe({
           data: { mediaType, dataUrl, fileName },
+          signal,
         });
+        if (stopped(signal)) return;
         if (!transcript.trim()) {
           toast.error(`No speech found in ${file.name}`);
           continue;
@@ -282,15 +345,16 @@ function Studio() {
         setText((current) => (current ? `${current}\n\n${transcript}` : transcript));
         setMediaLabels((current) => [...current, file.name]);
       }
-      toast.success("Recording written out — you can edit the words below");
+      toast.success("Recording written out. You can edit the words below.");
     } catch (error) {
+      if (stopped(signal)) return;
       toast.error(
         error instanceof Error
           ? `We couldn't listen to that file. ${error.message}`
           : "We couldn't listen to that file.",
       );
     } finally {
-      setBusy("idle");
+      endJob(signal);
     }
   }
 
@@ -305,6 +369,7 @@ function Studio() {
       return;
     }
     setBusy("generating");
+    const signal = beginJob("Making your memory aids…");
     try {
       const inputHints = [
         notes,
@@ -328,11 +393,16 @@ function Studio() {
             locale: access.localeStyle,
             images: imageData,
           },
+          signal,
         }),
         checkOn
-          ? makeQuestions({ data: { text, images: imageData, locale: access.localeStyle } }).catch(() => ({ questions: [] }))
+          ? makeQuestions({
+              data: { text, images: imageData, locale: access.localeStyle },
+              signal,
+            }).catch(() => ({ questions: [] }))
           : Promise.resolve({ questions: [] }),
       ]);
+      if (stopped(signal)) return;
 
       const setId = `set-${Date.now()}`;
       const created: SavedMnemonic[] = (output?.items ?? []).map((item, i) => ({
@@ -381,11 +451,12 @@ function Studio() {
       }
       if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (error) {
+      if (stopped(signal)) return;
       toast.error(
         error instanceof Error ? error.message : "Something went wrong making your memory aids",
       );
     } finally {
-      setBusy("idle");
+      endJob(signal);
     }
   }
 
@@ -501,7 +572,10 @@ function Studio() {
                   type="file"
                   accept="image/*"
                   multiple
-                  onChange={(event) => void onImages(event.target.files)}
+                  onChange={(event) => {
+                    void onImages(event.target.files);
+                    event.target.value = "";
+                  }}
                 />
                 <p className="text-sm text-muted-foreground">
                   A page from a book, a whiteboard, a handwritten equation. Up to 3.
@@ -528,7 +602,10 @@ function Studio() {
                   type="file"
                   accept="audio/*,video/*"
                   multiple
-                  onChange={(event) => void onMedia(event.target.files)}
+                  onChange={(event) => {
+                    void onMedia(event.target.files);
+                    event.target.value = "";
+                  }}
                   disabled={busy !== "idle"}
                 />
                 <p className="text-sm text-muted-foreground">
@@ -537,11 +614,7 @@ function Studio() {
               </div>
             </div>
 
-            {busy === "transcribing" && (
-              <p className="flex items-center gap-2 text-base">
-                <Loader2 className="size-4 animate-spin" /> {readingDocs ? "Reading your document…" : "Listening to your recording…"}
-              </p>
-            )}
+            {busy === "transcribing" && job && <JobBanner job={job} onStop={stopJob} />}
 
             {mediaLabels.length > 0 && (
               <div className="space-y-2 rounded-xl bg-secondary px-4 py-3 text-base">
@@ -690,6 +763,7 @@ function Studio() {
                 </>
               )}
             </Button>
+            {busy === "generating" && job && <JobBanner job={job} onStop={stopJob} />}
           </CardContent>
         </Card>
 
@@ -965,5 +1039,43 @@ function ListenAll({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+/** Shows what is happening, how long it has taken, and a Stop button. */
+function JobBanner({
+  job,
+  onStop,
+}: {
+  job: { label: string; startedAt: number };
+  onStop: () => void;
+}) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const seconds = Math.max(0, Math.round((now - job.startedAt) / 1000));
+  const slow = seconds >= 20;
+  return (
+    <div
+      className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-primary/40 bg-primary/5 px-4 py-3"
+      role="status"
+      aria-live="polite"
+      data-testid="job-banner"
+    >
+      <div className="flex items-center gap-3">
+        <Loader2 className="size-5 shrink-0 animate-spin text-primary" />
+        <div>
+          <p className="text-base font-semibold">{job.label}</p>
+          <p className="text-sm text-muted-foreground">
+            {seconds}s{slow ? ". Taking a while? A weak connection or a big file slows this down." : ""}
+          </p>
+        </div>
+      </div>
+      <Button type="button" variant="outline" size="lg" onClick={onStop}>
+        <OctagonX className="mr-2 size-5" /> Stop
+      </Button>
+    </div>
   );
 }

@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { Output, streamText } from "ai";
 import { z } from "zod";
+import { captureStreamErrors } from "./ai-errors";
 import { createResponsesModel, responsesProviderOptions } from "./ai-gateway.server";
 import { localeGuide } from "./locale";
 
@@ -95,7 +96,9 @@ export const generateMnemonics = createServerFn({ method: "POST" })
       parts.push({ type: "file", mediaType: image.mediaType, data: image.dataUrl });
     }
 
+    const errs = captureStreamErrors();
     const result = streamText({
+      onError: errs.onError,
       model: createResponsesModel(),
       system,
       messages: [{ role: "user", content: parts }],
@@ -103,7 +106,9 @@ export const generateMnemonics = createServerFn({ method: "POST" })
       providerOptions: responsesProviderOptions,
     });
 
-    return await result.output;
+    return await Promise.resolve(result.output).catch((e: unknown) => {
+      throw errs.explain(e);
+    });
   });
 
 const ReadImageInput = z.object({
@@ -128,7 +133,9 @@ export const readImageText = createServerFn({ method: "POST" })
       parts.push({ type: "file", mediaType: image.mediaType, data: image.dataUrl });
     }
 
+    const errs = captureStreamErrors();
     const result = streamText({
+      onError: errs.onError,
       model: createResponsesModel(),
       system:
         "You transcribe study material from photos for a dyslexic learner. Output only the transcribed content: short lines, common words, no commentary, no markdown headers.",
@@ -136,7 +143,9 @@ export const readImageText = createServerFn({ method: "POST" })
       providerOptions: responsesProviderOptions,
     });
 
-    return { text: (await result.text).trim() };
+    return { text: (await Promise.resolve(result.text).catch((e: unknown) => {
+      throw errs.explain(e);
+    })).trim() };
   });
 
 const TranscribeInput = z.object({
@@ -220,7 +229,9 @@ export const makeRecallQuestions = createServerFn({ method: "POST" })
       parts.push({ type: "file", mediaType: image.mediaType, data: image.dataUrl });
     }
 
+    const errs = captureStreamErrors();
     const result = streamText({
+      onError: errs.onError,
       model: createResponsesModel(),
       system:
         `You write short recall questions for a dyslexic learner aged 9 to 14. Short sentences, common words, no trick questions, no 'all of the above'. Only use facts in the material. ${localeGuide(data.locale)} Never change the facts themselves to fit the setting.`,
@@ -229,7 +240,9 @@ export const makeRecallQuestions = createServerFn({ method: "POST" })
       providerOptions: responsesProviderOptions,
     });
 
-    const output = await result.output;
+    const output = await Promise.resolve(result.output).catch((e: unknown) => {
+      throw errs.explain(e);
+    });
     const questions = (output?.questions ?? [])
       .filter(
         (q) =>
@@ -250,7 +263,9 @@ const DocumentInput = z.object({
 export const readDocument = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => DocumentInput.parse(input))
   .handler(async ({ data }) => {
+    const errs = captureStreamErrors();
     const result = streamText({
+      onError: errs.onError,
       model: createResponsesModel(),
       system:
         "You transcribe study documents for a dyslexic learner. Output only the content: the headings, facts, lists and formulas in their original order, as short lines. Keep formulas in plain text notation (x^2, sqrt(3), a/b). No commentary, no markdown headers, never add facts that are not in the document.",
@@ -265,5 +280,7 @@ export const readDocument = createServerFn({ method: "POST" })
       ],
       providerOptions: responsesProviderOptions,
     });
-    return { text: (await result.text).trim() };
+    return { text: (await Promise.resolve(result.text).catch((e: unknown) => {
+      throw errs.explain(e);
+    })).trim() };
   });
