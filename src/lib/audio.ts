@@ -100,6 +100,11 @@ export function hasSong(lyrics: string) {
   return readClip(`song:${hash(lyrics.trim().slice(0, 600))}`).then(Boolean);
 }
 
+/** The song already kept on this device for these lyrics, if any (never makes a new one). */
+export function storedSong(lyrics: string) {
+  return readClip(`song:${hash(lyrics.trim().slice(0, 600))}`);
+}
+
 /** Keep a ready-made song as the sung version of these lyrics, so "Sing it" plays it for free. */
 export async function rememberSong(lyrics: string, src: string) {
   const response = await fetch(src);
