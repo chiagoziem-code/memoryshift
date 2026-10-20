@@ -11,7 +11,7 @@ import { SONG_STYLE_IDS, isLongSong, songStyleById } from "@/lib/song-styles";
  * so a failure here never blocks learning.
  */
 
-const GATEWAY = "https://ai.gateway.lovable.dev/v1";
+const GATEWAY = process.env["AI_GATEWAY_URL"] ?? "https://ai.gateway.lovable.dev/v1";
 const TTS_MODEL = "google/gemini-2.5-flash-tts";
 /** 30-second clips for short rhymes; full-length tracks so long rhymes fit. */
 const MUSIC_MODEL = "google/lyria-3-clip-preview";
@@ -136,6 +136,16 @@ function findAudio(node: unknown): { data: string; mimeType: string } | null {
   return null;
 }
 
+/** Recognise a ready-made audio file from its first bytes (WAV, MP3, Ogg). */
+function sniff(bytes: Uint8Array): string | null {
+  const ascii = (start: number, n: number) => String.fromCharCode(...bytes.subarray(start, start + n));
+  if (bytes.length > 12 && ascii(0, 4) === "RIFF" && ascii(8, 4) === "WAVE") return "audio/wav";
+  if (bytes.length > 3 && ascii(0, 3) === "ID3") return "audio/mpeg";
+  if (bytes.length > 2 && bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0) return "audio/mpeg";
+  if (bytes.length > 4 && ascii(0, 4) === "OggS") return "audio/ogg";
+  return null;
+}
+
 /** Turn whatever the gateway sent back into a browser-playable file. */
 async function toPlayable(response: Response) {
   const type = response.headers.get("content-type") ?? "";
@@ -143,6 +153,8 @@ async function toPlayable(response: Response) {
     const found = findAudio(await response.json());
     if (!found) throw new Error("Speech failed: no audio in the response");
     const bytes = fromBase64(found.data);
+    const sniffed = sniff(bytes);
+    if (sniffed) return { audioBase64: found.data, mimeType: sniffed };
     const mime = found.mimeType.toLowerCase();
     if (mime.includes("mpeg") || mime.includes("mp3")) return { audioBase64: found.data, mimeType: "audio/mpeg" };
     if (mime.includes("wav")) return { audioBase64: found.data, mimeType: "audio/wav" };
@@ -150,6 +162,8 @@ async function toPlayable(response: Response) {
     return { audioBase64: toBase64(pcmToWav(bytes, rate)), mimeType: "audio/wav" };
   }
   const bytes = new Uint8Array(await response.arrayBuffer());
+  const sniffed = sniff(bytes);
+  if (sniffed) return { audioBase64: toBase64(bytes), mimeType: sniffed };
   if (type.includes("pcm") || type.includes("l16")) {
     return { audioBase64: toBase64(pcmToWav(bytes)), mimeType: "audio/wav" };
   }
@@ -162,45 +176,98 @@ const SpeakInput = z.object({
   accent: z.enum(["ng", "intl"]).default("ng"),
 });
 
+type SpeechAttempt = { name: string; body: Record<string, unknown> };
+
+/**
+ * The gateway passes speech requests through to the provider, and the exact
+ * shape it accepts has varied. We try the known shapes in order, remember the
+ * one that works for the rest of this server's life, and if all fail report
+ * every error so the cause is visible.
+ */
+function speechAttempts(text: string, voice: VoiceId, accent: Accent): SpeechAttempt[] {
+  const voiceName = VOICES[voice].gemini;
+  const style = speakingStyle(voice, accent);
+  const generationConfig = {
+    responseModalities: ["AUDIO"],
+    speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },
+  };
+  return [
+    {
+      name: "gemini",
+      body: {
+        model: TTS_MODEL,
+        contents: [{ role: "user", parts: [{ text: `${style}\n\nSay this: ${text}` }] }],
+        generationConfig,
+      },
+    },
+    {
+      name: "gemini-plain",
+      body: {
+        model: TTS_MODEL,
+        contents: [{ role: "user", parts: [{ text }] }],
+        generationConfig,
+      },
+    },
+    {
+      name: "gemini-interactions",
+      body: {
+        model: TTS_MODEL,
+        input: [
+          {
+            type: "user_input",
+            content: [{ type: "text", text, annotations: [{ type: "speech_metadata", style }] }],
+          },
+        ],
+        response_format: { type: "audio" },
+        generation_config: { speech_config: [{ voice: voiceName }] },
+      },
+    },
+    {
+      name: "openai",
+      body: {
+        model: "openai/gpt-4o-mini-tts",
+        input: text,
+        voice: voice === "bigbrother" ? "ash" : voice === "storyteller" ? "sage" : "coral",
+        instructions: style,
+        response_format: "mp3",
+      },
+    },
+  ];
+}
+
+let workingAttempt: string | null = null;
+
 export const speakText = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => SpeakInput.parse(input))
   .handler(async ({ data }) => {
     const key = gatewayKey();
-    const voiceName = VOICES[data.voice].gemini;
-    const style = speakingStyle(data.voice, data.accent);
+    const all = speechAttempts(data.text, data.voice, data.accent);
+    const ordered = workingAttempt
+      ? [...all.filter((a) => a.name === workingAttempt), ...all.filter((a) => a.name !== workingAttempt)]
+      : all;
 
-    // Gemini-style request first (style goes before the words), then the
-    // OpenAI-style body the endpoint also accepts (style goes in instructions).
-    const attempts = [
-      {
-        model: TTS_MODEL,
-        contents: [{ parts: [{ text: `${style}\n\nSay this: ${data.text}` }] }],
-        generationConfig: {
-          responseModalities: ["AUDIO"],
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },
-        },
-      },
-      {
-        model: TTS_MODEL,
-        input: data.text,
-        voice: voiceName,
-        instructions: style,
-        response_format: "mp3",
-      },
-    ];
-
-    let lastError: Error | null = null;
-    for (const body of attempts) {
+    const errors: string[] = [];
+    for (const attempt of ordered) {
       const response = await fetch(`${GATEWAY}/audio/speech`, {
         method: "POST",
         headers: headers(key),
-        body: JSON.stringify(body),
+        body: JSON.stringify(attempt.body),
       });
-      if (response.ok) return await toPlayable(response);
-      lastError = await gatewayError(response, "Speech");
-      if (response.status === 402 || response.status === 429) break;
+      if (response.ok) {
+        try {
+          const audio = await toPlayable(response);
+          workingAttempt = attempt.name;
+          return audio;
+        } catch (error) {
+          errors.push(`${attempt.name}: ${error instanceof Error ? error.message : "no audio"}`);
+          continue;
+        }
+      }
+      const failure = await gatewayError(response, "Speech");
+      if (response.status === 402 || response.status === 429) throw failure;
+      errors.push(`${attempt.name}: ${failure.message.replace(/^Speech failed /, "").slice(0, 160)}`);
     }
-    throw lastError ?? new Error("Speech failed");
+    throw new Error(`Speech failed. ${errors.join(" | ")}`);
   });
 
 const SingInput = z.object({
