@@ -1,4 +1,5 @@
 import { singRhyme, speakText } from "@/lib/audio.functions";
+import type { SongStyleId } from "@/lib/song-styles";
 
 /**
  * Audio clips are paid for once, then kept on the device (IndexedDB),
@@ -39,11 +40,18 @@ async function readClip(key: string): Promise<Blob | null> {
 async function writeClip(key: string, blob: Blob) {
   const db = await openDb();
   if (!db) return;
-  try {
-    db.transaction(STORE, "readwrite").objectStore(STORE).put(blob, key);
-  } catch {
-    /* storage full or blocked: the clip still plays this session */
-  }
+  await new Promise<void>((resolve) => {
+    try {
+      const tx = db.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).put(blob, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
+    } catch {
+      /* storage full or blocked: the clip still plays this session */
+      resolve();
+    }
+  });
 }
 
 function hash(text: string) {
@@ -85,33 +93,74 @@ export function speechClip(text: string, voice: VoiceChoice) {
   });
 }
 
-/** Sung version of a rhyme (cached). */
+const songKey = (lyrics: string) => `song:${hash(lyrics.trim().slice(0, 600))}`;
+const SONG_INFO_KEY = "memoryshift.songs.v1";
+
+export type SongInfo = { style: SongStyleId; composedAt: string };
+
+function readSongInfo(): Record<string, SongInfo> {
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(window.localStorage.getItem(SONG_INFO_KEY) ?? "{}") as Record<string, SongInfo>;
+  } catch {
+    return {};
+  }
+}
+
+/** Which style the kept song for these lyrics was composed in, and when. */
+export function songInfo(lyrics: string): SongInfo | null {
+  return readSongInfo()[songKey(lyrics)] ?? null;
+}
+
+/** Sung version of a rhyme: plays the kept song, or composes one the first time. */
 export function songClip(lyrics: string, title?: string) {
   const clean = lyrics.trim().slice(0, 600);
-  return cached(`song:${hash(clean)}`, async () => {
+  return cached(songKey(clean), async () => {
     const { audioBase64, mimeType } = await singRhyme({
       data: { lyrics: clean, ...(title ? { title: title.slice(0, 120) } : {}) },
     });
+    saveSongInfo(clean, "pop");
     return base64ToBlob(audioBase64, mimeType);
   });
 }
 
+function saveSongInfo(lyrics: string, style: SongStyleId) {
+  if (typeof window === "undefined") return;
+  const all = readSongInfo();
+  all[songKey(lyrics)] = { style, composedAt: new Date().toISOString() };
+  window.localStorage.setItem(SONG_INFO_KEY, JSON.stringify(all));
+}
+
+/**
+ * Compose a brand-new song for this rhyme in the chosen style (one paid generation per press),
+ * and keep it as the rhyme's song so Review, Studio and downloads replay it for free.
+ */
+export function composeSong(lyrics: string, style: SongStyleId, title?: string) {
+  const clean = lyrics.trim().slice(0, 600);
+  const key = songKey(clean);
+  const existing = pending.get(key);
+  if (existing) return existing;
+  const job = (async () => {
+    const { audioBase64, mimeType } = await singRhyme({
+      data: { lyrics: clean, style, ...(title ? { title: title.slice(0, 120) } : {}) },
+    });
+    const blob = base64ToBlob(audioBase64, mimeType);
+    await writeClip(key, blob);
+    saveSongInfo(clean, style);
+    return blob;
+  })();
+  pending.set(key, job);
+  void job.finally(() => pending.delete(key)).catch(() => undefined);
+  return job;
+}
+
 export function hasSong(lyrics: string) {
-  return readClip(`song:${hash(lyrics.trim().slice(0, 600))}`).then(Boolean);
+  return readClip(songKey(lyrics)).then(Boolean);
 }
 
 /** The song already kept on this device for these lyrics, if any (never makes a new one). */
 export function storedSong(lyrics: string) {
-  return readClip(`song:${hash(lyrics.trim().slice(0, 600))}`);
-}
-
-/** Keep a ready-made song as the sung version of these lyrics, so "Sing it" plays it for free. */
-export async function rememberSong(lyrics: string, src: string) {
-  const response = await fetch(src);
-  if (!response.ok) throw new Error(`Couldn't load the song (${response.status})`);
-  const blob = await response.blob();
-  await writeClip(`song:${hash(lyrics.trim().slice(0, 600))}`, blob);
-  return blob;
+  return readClip(songKey(lyrics));
 }
 
 export function downloadBlob(blob: Blob, name: string) {
