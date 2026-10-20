@@ -14,6 +14,7 @@ import { Route as AccountRouteImport } from './routes/account'
 import { Route as CheckRouteImport } from './routes/check'
 import { Route as HomeRouteImport } from './routes/home'
 import { Route as LibraryRouteImport } from './routes/library'
+import { Route as MusicRouteImport } from './routes/music'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as ProgressRouteImport } from './routes/progress'
@@ -44,6 +45,11 @@ const HomeRoute = HomeRouteImport.update({
 const LibraryRoute = LibraryRouteImport.update({
   id: '/library',
   path: '/library',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MusicRoute = MusicRouteImport.update({
+  id: '/music',
+  path: '/music',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OnboardingRoute = OnboardingRouteImport.update({
@@ -83,6 +89,7 @@ export interface FileRoutesByFullPath {
   '/check': typeof CheckRoute
   '/home': typeof HomeRoute
   '/library': typeof LibraryRoute
+  '/music': typeof MusicRoute
   '/onboarding': typeof OnboardingRoute
   '/profile': typeof ProfileRoute
   '/progress': typeof ProgressRoute
@@ -96,6 +103,7 @@ export interface FileRoutesByTo {
   '/check': typeof CheckRoute
   '/home': typeof HomeRoute
   '/library': typeof LibraryRoute
+  '/music': typeof MusicRoute
   '/onboarding': typeof OnboardingRoute
   '/profile': typeof ProfileRoute
   '/progress': typeof ProgressRoute
@@ -110,6 +118,7 @@ export interface FileRoutesById {
   '/check': typeof CheckRoute
   '/home': typeof HomeRoute
   '/library': typeof LibraryRoute
+  '/music': typeof MusicRoute
   '/onboarding': typeof OnboardingRoute
   '/profile': typeof ProfileRoute
   '/progress': typeof ProgressRoute
@@ -125,6 +134,7 @@ export interface FileRouteTypes {
     | '/check'
     | '/home'
     | '/library'
+    | '/music'
     | '/onboarding'
     | '/profile'
     | '/progress'
@@ -138,6 +148,7 @@ export interface FileRouteTypes {
     | '/check'
     | '/home'
     | '/library'
+    | '/music'
     | '/onboarding'
     | '/profile'
     | '/progress'
@@ -151,6 +162,7 @@ export interface FileRouteTypes {
     | '/check'
     | '/home'
     | '/library'
+    | '/music'
     | '/onboarding'
     | '/profile'
     | '/progress'
@@ -165,6 +177,7 @@ export interface RootRouteChildren {
   CheckRoute: typeof CheckRoute
   HomeRoute: typeof HomeRoute
   LibraryRoute: typeof LibraryRoute
+  MusicRoute: typeof MusicRoute
   OnboardingRoute: typeof OnboardingRoute
   ProfileRoute: typeof ProfileRoute
   ProgressRoute: typeof ProgressRoute
@@ -208,6 +221,13 @@ declare module '@tanstack/react-router' {
       path: '/library'
       fullPath: '/library'
       preLoaderRoute: typeof LibraryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/music': {
+      id: '/music'
+      path: '/music'
+      fullPath: '/music'
+      preLoaderRoute: typeof MusicRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/onboarding': {
@@ -261,6 +281,7 @@ const rootRouteChildren: RootRouteChildren = {
   CheckRoute: CheckRoute,
   HomeRoute: HomeRoute,
   LibraryRoute: LibraryRoute,
+  MusicRoute: MusicRoute,
   OnboardingRoute: OnboardingRoute,
   ProfileRoute: ProfileRoute,
   ProgressRoute: ProgressRoute,
