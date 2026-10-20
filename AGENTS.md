@@ -8,3 +8,5 @@
 > Commits you push to the connected branch sync back to Lovable and show up in
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
+
+- Pre-made memory songs are generated once and shipped as static MP3s in public/music (data in src/lib/songs.ts); why: learners play them instantly with no per-play AI cost.

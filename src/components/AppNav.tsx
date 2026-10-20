@@ -16,6 +16,7 @@ const links = [
   { to: "/home", label: "My space" },
   { to: "/studio", label: "Studio" },
   { to: "/library", label: "Library" },
+  { to: "/music", label: "Music" },
   { to: "/review", label: "Review" },
   { to: "/check", label: "Memory check" },
   { to: "/progress", label: "Progress" },

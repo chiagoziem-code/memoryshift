@@ -7,5 +7,6 @@
 - [x] Review mode (spaced repetition, read-aloud, adjustable text, confidence ratings) — /review
 - [x] Persistent learner storage: sets, favourites, access settings, review history + backup/restore
 - [x] Progress view (confidence trend, upcoming reviews, best formats) — /progress
+- [x] Music library: pre-made memory songs with lyrics + Save as my set — /music
 - [ ] Test transcription of audio/video uploads end to end in the browser
 - [ ] Optional: learner accounts so progress syncs across devices
