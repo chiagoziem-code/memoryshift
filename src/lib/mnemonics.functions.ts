@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { Output, streamText } from "ai";
 import { z } from "zod";
 import { createResponsesModel, responsesProviderOptions } from "./ai-gateway.server";
+import { localeGuide } from "./locale";
 
 const FORMAT_IDS = [
   "acronym",
@@ -20,6 +21,7 @@ const GenerateInput = z.object({
   notes: z.string().default(""),
   formats: z.array(z.enum(FORMAT_IDS)).min(1).max(4),
   readingLevel: z.enum(["simple", "standard"]).default("simple"),
+  locale: z.enum(["ng", "intl"]).default("ng"),
   images: z
     .array(z.object({ mediaType: z.string(), dataUrl: z.string() }))
     .max(3)
@@ -64,6 +66,7 @@ export const generateMnemonics = createServerFn({ method: "POST" })
       readability,
       "Never invent facts that are not in the material. Keep spelling simple and phonetic where possible.",
       "Produce exactly one mnemonic per requested format.",
+      localeGuide(data.locale),
     ].join(" ");
 
     const requested = data.formats
@@ -171,6 +174,7 @@ export const transcribeMedia = createServerFn({ method: "POST" })
 
 const RecallInput = z.object({
   text: z.string().default(""),
+  locale: z.enum(["ng", "intl"]).default("ng"),
   images: z
     .array(z.object({ mediaType: z.string(), dataUrl: z.string() }))
     .max(3)
@@ -219,7 +223,7 @@ export const makeRecallQuestions = createServerFn({ method: "POST" })
     const result = streamText({
       model: createResponsesModel(),
       system:
-        "You write short recall questions for a dyslexic learner aged 9 to 14. Short sentences, common words, no trick questions, no 'all of the above'. Only use facts in the material.",
+        `You write short recall questions for a dyslexic learner aged 9 to 14. Short sentences, common words, no trick questions, no 'all of the above'. Only use facts in the material. ${localeGuide(data.locale)} Never change the facts themselves to fit the setting.`,
       messages: [{ role: "user", content: parts }],
       output: Output.object({ schema: RecallSchema }),
       providerOptions: responsesProviderOptions,
@@ -235,4 +239,31 @@ export const makeRecallQuestions = createServerFn({ method: "POST" })
       .map((q) => ({ ...q, options: q.options.slice(0, 3) }))
       .filter((q) => q.answerIndex < q.options.length);
     return { questions };
+  });
+
+const DocumentInput = z.object({
+  dataUrl: z.string(),
+  fileName: z.string().default("document.pdf"),
+});
+
+/** Read the words out of a PDF (typed or scanned) for a dyslexic learner. */
+export const readDocument = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) => DocumentInput.parse(input))
+  .handler(async ({ data }) => {
+    const result = streamText({
+      model: createResponsesModel(),
+      system:
+        "You transcribe study documents for a dyslexic learner. Output only the content: the headings, facts, lists and formulas in their original order, as short lines. Keep formulas in plain text notation (x^2, sqrt(3), a/b). No commentary, no markdown headers, never add facts that are not in the document.",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: `Write out the study content of this document (${data.fileName}).` },
+            { type: "file", mediaType: "application/pdf", data: data.dataUrl, filename: data.fileName },
+          ],
+        },
+      ],
+      providerOptions: responsesProviderOptions,
+    });
+    return { text: (await result.text).trim() };
   });

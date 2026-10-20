@@ -10,6 +10,9 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { loadPilot, savePilot } from "@/lib/recall";
+import { LOCALE_OPTIONS } from "@/lib/locale";
+import { VOICES, type VoiceId } from "@/lib/audio.functions";
+import { Loader2, Pause, Play } from "lucide-react";
 import { FONT_STACKS, useA11y, type ContrastChoice, type FontChoice } from "@/lib/a11y";
 import {
   clearLearnerData,
@@ -223,6 +226,27 @@ function SettingsPage() {
             <CardTitle className="text-xl">Listening</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
+            <div className="space-y-2">
+              <p className="font-semibold">Made for</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {LOCALE_OPTIONS.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    aria-pressed={settings.localeStyle === option.id}
+                    onClick={() => update({ localeStyle: option.id })}
+                    className={`rounded-2xl border-2 px-4 py-3 text-left ${
+                      settings.localeStyle === option.id
+                        ? "border-primary bg-primary/10"
+                        : "border-border bg-card hover:border-primary"
+                    }`}
+                  >
+                    <span className="block font-semibold">{option.label}</span>
+                    <span className="block text-sm text-muted-foreground">{option.help}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
             <label className="flex items-start justify-between gap-4">
               <span>
                 <span className="block font-semibold">Audio-first mode</span>
@@ -250,28 +274,7 @@ function SettingsPage() {
                 aria-label="Natural voice"
               />
             </label>
-            {settings.voice === "natural" && (
-              <div className="space-y-2">
-                <p className="font-semibold">Which voice?</p>
-                <div className="flex flex-wrap gap-2">
-                  {(
-                    [
-                      ["warm", "Calm and warm"],
-                      ["bright", "Bright and lively"],
-                    ] as const
-                  ).map(([id, label]) => (
-                    <Button
-                      key={id}
-                      type="button"
-                      variant={settings.naturalVoice === id ? "default" : "outline"}
-                      onClick={() => update({ naturalVoice: id })}
-                    >
-                      {label}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            )}
+            {settings.voice === "natural" && <VoicePicker />}
             <Control
               label={`Playback speed (${settings.speechRate.toFixed(2)}x)`}
               value={settings.speechRate * 100}
@@ -404,5 +407,77 @@ function PilotCard() {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+const VOICE_SAMPLE =
+  "Hello! Let's learn this together. Water goes up from the river, it forms clouds, and then the rain comes down. Well done!";
+
+/** Pick a voice by hearing it. Shows which voice actually played. */
+function VoicePicker() {
+  const { settings, update, preview, stopSpeaking, speakingText, loadingVoice, voiceStatus } = useA11y();
+  const [playing, setPlaying] = useState<VoiceId | null>(null);
+
+  async function hear(id: VoiceId) {
+    if (playing === id && speakingText) {
+      stopSpeaking();
+      setPlaying(null);
+      return;
+    }
+    setPlaying(id);
+    await preview(id, VOICE_SAMPLE);
+    setPlaying(null);
+  }
+
+  return (
+    <div className="space-y-3" data-testid="voice-picker">
+      <p className="font-semibold">Which voice?</p>
+      <div className="grid gap-2">
+        {(Object.keys(VOICES) as VoiceId[]).map((id) => {
+          const chosen = settings.naturalVoice === id;
+          const busy = playing === id;
+          return (
+            <div
+              key={id}
+              className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 px-4 py-3 ${
+                chosen ? "border-primary bg-primary/10" : "border-border bg-card"
+              }`}
+            >
+              <button
+                type="button"
+                aria-pressed={chosen}
+                onClick={() => update({ naturalVoice: id })}
+                className="text-left"
+              >
+                <span className="block font-semibold">{VOICES[id].label}</span>
+                <span className="block text-sm text-muted-foreground">{VOICES[id].blurb}</span>
+              </button>
+              <Button type="button" variant="secondary" onClick={() => void hear(id)}>
+                {busy && loadingVoice ? (
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                ) : busy ? (
+                  <Pause className="mr-2 size-4" />
+                ) : (
+                  <Play className="mr-2 size-4" />
+                )}
+                {busy ? "Stop" : "Hear it"}
+              </Button>
+            </div>
+          );
+        })}
+      </div>
+      {voiceStatus && (
+        <p
+          className={`rounded-xl px-3 py-2 text-sm ${
+            voiceStatus.source === "natural" ? "bg-primary/10" : "bg-accent/30"
+          }`}
+          data-testid="voice-status"
+        >
+          {voiceStatus.source === "natural"
+            ? "Last played: the natural AI voice."
+            : `Last played: this phone's built-in voice, because the AI voice didn't load (${voiceStatus.reason}).`}
+        </p>
+      )}
+    </div>
   );
 }

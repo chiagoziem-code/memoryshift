@@ -5,6 +5,8 @@ import {
   BrainCircuit,
   CalendarClock,
   FileText,
+  FileUp,
+  Globe2,
   Image as ImageIcon,
   Loader2,
   Mic,
@@ -29,6 +31,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   generateMnemonics,
   makeRecallQuestions,
+  readDocument,
   readImageText,
   transcribeMedia,
 } from "@/lib/mnemonics.functions";
@@ -43,6 +46,8 @@ import {
   type RecallStage,
 } from "@/lib/recall";
 import { loadActiveLearner, syncCheckInBackground } from "@/lib/sync";
+import { LOCALE_OPTIONS } from "@/lib/locale";
+import { DOCUMENT_ACCEPT, MAX_DOC_CHARS, documentKind, readLocalDocument } from "@/lib/documents";
 import {
   FORMATS,
   formatById,
@@ -121,12 +126,15 @@ function Studio() {
   const transcribe = useServerFn(transcribeMedia);
   const readPictures = useServerFn(readImageText);
   const makeQuestions = useServerFn(makeRecallQuestions);
+  const readPdf = useServerFn(readDocument);
+  const { settings: access, update: updateAccess } = useA11y();
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [text, setText] = useState("");
   const [notes, setNotes] = useState("");
   const [images, setImages] = useState<Attachment[]>([]);
   const [mediaLabels, setMediaLabels] = useState<string[]>([]);
+  const [readingDocs, setReadingDocs] = useState(false);
   const [isFormula, setIsFormula] = useState(false);
   const [busy, setBusy] = useState<"idle" | "transcribing" | "generating">("idle");
 
@@ -196,6 +204,50 @@ function Studio() {
     } catch (error) {
       toast.error(error instanceof Error ? `We couldn't read that picture. ${error.message}` : "We couldn't read that picture.");
     } finally {
+      setBusy("idle");
+    }
+  }
+
+  async function onDocuments(files: FileList | null) {
+    const picked = Array.from(files ?? []).slice(0, 3);
+    if (picked.length === 0) return;
+    setBusy("transcribing");
+    setReadingDocs(true);
+    try {
+      for (const file of picked) {
+        if (file.size > MAX_BYTES) {
+          toast.error(`${file.name} is too large (8 MB max)`);
+          continue;
+        }
+        let words = "";
+        try {
+          words =
+            documentKind(file) === "pdf"
+              ? (await readPdf({ data: { dataUrl: await readFile(file), fileName: file.name } })).text
+              : await readLocalDocument(file);
+        } catch (error) {
+          toast.error(
+            error instanceof Error
+              ? `We couldn't read ${file.name}. ${error.message}`
+              : `We couldn't read ${file.name}.`,
+          );
+          continue;
+        }
+        words = words.replace(/\n{3,}/g, "\n\n").trim();
+        if (!words) {
+          toast.error(`No words found in ${file.name}. Try a photo of the page instead.`);
+          continue;
+        }
+        if (words.length > MAX_DOC_CHARS) {
+          words = words.slice(0, MAX_DOC_CHARS);
+          toast.message(`${file.name} is long, so we used the first part. Split it into topics for best results.`);
+        }
+        setText((current) => (current ? `${current}\n\n${words}` : words));
+        setMediaLabels((current) => [...current, file.name]);
+        toast.success(`Words added from ${file.name}. Check them below.`);
+      }
+    } finally {
+      setReadingDocs(false);
       setBusy("idle");
     }
   }
@@ -273,11 +325,12 @@ function Studio() {
             notes: inputHints,
             formats: selected,
             readingLevel: profile?.readingLevel ?? "simple",
+            locale: access.localeStyle,
             images: imageData,
           },
         }),
         checkOn
-          ? makeQuestions({ data: { text, images: imageData } }).catch(() => ({ questions: [] }))
+          ? makeQuestions({ data: { text, images: imageData, locale: access.localeStyle } }).catch(() => ({ questions: [] }))
           : Promise.resolve({ questions: [] }),
       ]);
 
@@ -417,6 +470,27 @@ function Studio() {
               />
             </div>
 
+            <div className="space-y-2">
+              <Label htmlFor="documents" className="text-base">
+                <FileUp className="mr-2 inline size-4" /> Documents
+              </Label>
+              <Input
+                id="documents"
+                type="file"
+                accept={DOCUMENT_ACCEPT}
+                multiple
+                onChange={(event) => {
+                  void onDocuments(event.target.files);
+                  event.target.value = "";
+                }}
+                disabled={busy !== "idle"}
+              />
+              <p className="text-sm text-muted-foreground">
+                PDF, Word, PowerPoint or text files: class notes, a worksheet, revision slides.
+                We pull out the words so you can check them below.
+              </p>
+            </div>
+
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="photos" className="text-base">
@@ -465,7 +539,7 @@ function Studio() {
 
             {busy === "transcribing" && (
               <p className="flex items-center gap-2 text-base">
-                <Loader2 className="size-4 animate-spin" /> Listening to your recording…
+                <Loader2 className="size-4 animate-spin" /> {readingDocs ? "Reading your document…" : "Listening to your recording…"}
               </p>
             )}
 
@@ -566,6 +640,28 @@ function Studio() {
               </div>
             </div>
             <p className="text-sm text-muted-foreground">Pick up to 4 at a time.</p>
+            <div className="space-y-2 rounded-2xl border-2 border-border bg-card px-4 py-4">
+              <p className="flex items-center gap-2 text-base font-semibold">
+                <Globe2 className="size-5 text-primary" /> Made for
+              </p>
+              <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Made for">
+                {LOCALE_OPTIONS.map((option) => (
+                  <Button
+                    key={option.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={access.localeStyle === option.id}
+                    variant={access.localeStyle === option.id ? "default" : "outline"}
+                    onClick={() => updateAccess({ localeStyle: option.id })}
+                  >
+                    {option.label}
+                  </Button>
+                ))}
+              </div>
+              <p className="text-sm text-muted-foreground">
+                {LOCALE_OPTIONS.find((o) => o.id === access.localeStyle)?.help}
+              </p>
+            </div>
             <label className="flex items-start justify-between gap-4 rounded-2xl border-2 border-border bg-card px-4 py-4">
               <span>
                 <span className="flex items-center gap-2 text-base font-semibold">

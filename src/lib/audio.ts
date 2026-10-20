@@ -1,4 +1,4 @@
-import { singRhyme, speakText } from "@/lib/audio.functions";
+import { fitLyrics, makeSong, singRhyme, speakText, type Accent, type TuneId, type VoiceId } from "@/lib/audio.functions";
 import type { SongStyleId } from "@/lib/song-styles";
 
 /**
@@ -82,13 +82,13 @@ async function cached(key: string, make: () => Promise<Blob>): Promise<Blob> {
   return job;
 }
 
-export type VoiceChoice = "warm" | "bright";
+export type VoiceChoice = VoiceId;
 
-/** Natural-voice clip for this text (cached). */
-export function speechClip(text: string, voice: VoiceChoice) {
+/** Natural-voice clip for this text (cached per voice and accent). */
+export function speechClip(text: string, voice: VoiceChoice, accent: Accent = "ng") {
   const clean = text.trim().slice(0, 1500);
-  return cached(`speech:${voice}:${hash(clean)}`, async () => {
-    const { audioBase64, mimeType } = await speakText({ data: { text: clean, voice } });
+  return cached(`speech2:${voice}:${accent}:${hash(clean)}`, async () => {
+    const { audioBase64, mimeType } = await speakText({ data: { text: clean, voice, accent } });
     return base64ToBlob(audioBase64, mimeType);
   });
 }
@@ -152,6 +152,41 @@ export function composeSong(lyrics: string, style: SongStyleId, title?: string) 
   pending.set(key, job);
   void job.finally(() => pending.delete(key)).catch(() => undefined);
   return job;
+}
+
+/** A song sung to the chosen tune or style, with the lyrics it used (cached). */
+export async function tuneSong(facts: string, tune: TuneId, title?: string, accent: Accent = "ng") {
+  const clean = facts.trim().slice(0, 1500);
+  const key = `tune:${tune}:${accent}:${hash(clean)}`;
+  let lines: string[] = [];
+  const blob = await cached(key, async () => {
+    const out = await makeSong({
+      data: { facts: clean, tune, accent, ...(title ? { title: title.slice(0, 120) } : {}) },
+    });
+    lines = out.lines;
+    await writeClip(`${key}:lyrics`, new Blob([JSON.stringify(out.lines)], { type: "application/json" }));
+    return base64ToBlob(out.audioBase64, out.mimeType);
+  });
+  if (lines.length === 0) {
+    const stored = await readClip(`${key}:lyrics`);
+    if (stored) lines = JSON.parse(await stored.text()) as string[];
+  }
+  return { blob, lines };
+}
+
+/** Short chant lines for speaking over the learner's own music (cached). */
+export async function chantLines(facts: string, accent: Accent = "ng"): Promise<string[]> {
+  const clean = facts.trim().slice(0, 1500);
+  const blob = await cached(`chant:${accent}:${hash(clean)}`, async () => {
+    const { lines } = await fitLyrics({ data: { facts: clean, tune: "own:chant", accent } });
+    return new Blob([JSON.stringify(lines)], { type: "application/json" });
+  });
+  return JSON.parse(await blob.text()) as string[];
+}
+
+/** Keep a song made on a rhyme card as that rhyme's song, so Review and Music replay it. */
+export async function keepRhymeSong(lyrics: string, blob: Blob) {
+  await writeClip(songKey(lyrics.trim().slice(0, 600)), blob);
 }
 
 export function hasSong(lyrics: string) {

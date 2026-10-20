@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { Download, Loader2, Music, Pause, Play, ThumbsDown, ThumbsUp } from "lucide-react";
+import { Download, Loader2, Pause, Play, ThumbsDown, ThumbsUp } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useA11y } from "@/lib/a11y";
-import { downloadBlob, songClip, speechClip } from "@/lib/audio";
+import { downloadBlob, speechClip } from "@/lib/audio";
+import { SongMaker } from "@/components/SongMaker";
 import { formatById, type SavedMnemonic } from "@/lib/mnemonics";
 
 /** The pieces of a memory aid, in reading order: title, body, each step, practice tip. */
@@ -40,8 +41,7 @@ export function MnemonicCard({
   const parts = mnemonicParts(item);
   const allText = parts.join(". ");
   const [ownPart, setOwnPart] = useState(-1);
-  const [busy, setBusy] = useState<"download" | "song" | "song-download" | null>(null);
-  const [songUrl, setSongUrl] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"download" | null>(null);
 
   const playingHere = speakingText === allText;
   const current = activePart !== undefined && activePart >= 0 ? activePart : playingHere ? ownPart : -1;
@@ -54,7 +54,7 @@ export function MnemonicCard({
   async function onDownload() {
     setBusy("download");
     try {
-      const blob = await speechClip(allText, settings.naturalVoice);
+      const blob = await speechClip(allText, settings.naturalVoice, settings.localeStyle);
       downloadBlob(blob, item.title);
     } catch (error) {
       toast.error(
@@ -62,33 +62,6 @@ export function MnemonicCard({
           ? `Couldn't make the audio file. ${error.message}`
           : "Couldn't make the audio file.",
       );
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function onSing() {
-    stopSpeaking();
-    setBusy("song");
-    try {
-      const blob = await songClip(lyricsFor(item), item.title);
-      const url = URL.createObjectURL(blob);
-      setSongUrl(url);
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? `Couldn't make the song. ${error.message}` : "Couldn't make the song.",
-      );
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function onDownloadSong() {
-    setBusy("song-download");
-    try {
-      downloadBlob(await songClip(lyricsFor(item), item.title), `${item.title} song`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't download the song.");
     } finally {
       setBusy(null);
     }
@@ -133,38 +106,8 @@ export function MnemonicCard({
             )}
             Save audio
           </Button>
-          {item.format === "rhyme" && (
-            <Button
-              type="button"
-              size="lg"
-              variant="secondary"
-              onClick={() => void onSing()}
-              disabled={busy !== null}
-            >
-              {busy === "song" ? (
-                <Loader2 className="mr-2 size-5 animate-spin" />
-              ) : (
-                <Music className="mr-2 size-5" />
-              )}
-              {busy === "song" ? "Writing the song…" : "Sing it"}
-            </Button>
-          )}
         </div>
-        {songUrl && (
-          <div className="space-y-2 rounded-xl bg-accent/30 px-3 py-3" data-testid="song-player">
-            <p className="text-sm font-semibold">🎵 Your song</p>
-            <audio controls autoPlay src={songUrl} className="w-full" />
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => void onDownloadSong()}
-              disabled={busy !== null}
-            >
-              <Download className="mr-2 size-4" /> Save song
-            </Button>
-          </div>
-        )}
+        {item.format === "rhyme" && <SongMaker item={item} />}
       </CardHeader>
       <CardContent className="space-y-5 text-lg">
         <p className={`whitespace-pre-line px-1 ${current === bodyIndex ? highlight : ""}`}>

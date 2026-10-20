@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { FileText, Image as ImageIcon, Mic, Sigma, Video, Wand2 } from "lucide-react";
+import { FileText, FileUp, Image as ImageIcon, Mic, Sigma, Video, Wand2 } from "lucide-react";
 import { AppNav } from "@/components/AppNav";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,6 +29,7 @@ export const Route = createFileRoute("/")({
 
 const inputs = [
   { icon: FileText, label: "Notes and text" },
+  { icon: FileUp, label: "Documents" },
   { icon: ImageIcon, label: "Photos of pages" },
   { icon: Sigma, label: "Formulas" },
   { icon: Mic, label: "Audio recordings" },
@@ -64,7 +65,7 @@ function Home() {
 
         <section className="space-y-5">
           <h2 className="text-2xl font-semibold">Bring it in any way you like</h2>
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
             {inputs.map(({ icon: Icon, label }) => (
               <div
                 key={label}

@@ -10,6 +10,8 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { speechClip } from "@/lib/audio";
+import type { VoiceId } from "@/lib/audio.functions";
+import type { LocaleStyle } from "@/lib/locale";
 
 export type FontChoice = "lexend" | "atkinson" | "system" | "serif" | "mono";
 export type ContrastChoice = "cream" | "white" | "dark" | "high";
@@ -27,7 +29,9 @@ export type A11ySettings = {
   readingRuler: boolean;
   /** "natural" = AI voice (falls back to the device voice), "device" = built-in voice. */
   voice: "natural" | "device";
-  naturalVoice: "warm" | "bright";
+  naturalVoice: VoiceId;
+  /** Who the app is made for: shapes wording, examples and accent. */
+  localeStyle: LocaleStyle;
   /** Memory aids and questions play by themselves when they appear. */
   audioFirst: boolean;
 };
@@ -55,7 +59,8 @@ export const defaultSettings = (): A11ySettings => ({
   speechRate: 0.9,
   readingRuler: false,
   voice: "natural",
-  naturalVoice: "warm",
+  naturalVoice: "teacher",
+  localeStyle: "ng",
   audioFirst: true,
 });
 
@@ -66,7 +71,11 @@ export function loadSettings(): A11ySettings {
   try {
     const raw = window.localStorage.getItem(KEY);
     if (!raw) return defaultSettings();
-    return { ...defaultSettings(), ...(JSON.parse(raw) as A11ySettings) };
+    const stored = JSON.parse(raw) as Partial<A11ySettings> & { naturalVoice?: string };
+    // Older versions had "warm" and "bright" voices.
+    const legacy: Record<string, VoiceId> = { warm: "teacher", bright: "bigbrother" };
+    const voice = stored.naturalVoice && legacy[stored.naturalVoice];
+    return { ...defaultSettings(), ...stored, ...(voice ? { naturalVoice: voice } : {}) } as A11ySettings;
   } catch {
     return defaultSettings();
   }
@@ -99,6 +108,10 @@ type Ctx = {
   speakingText: string | null;
   /** True while a natural-voice clip is being fetched. */
   loadingVoice: boolean;
+  /** Which voice actually played last, and why the AI voice was skipped if it was. */
+  voiceStatus: { source: "natural" | "device"; reason?: string } | null;
+  /** Play a sample in a specific voice (for choosing a voice). */
+  preview: (voice: VoiceId, text: string) => Promise<void>;
 };
 
 const A11yContext = createContext<Ctx | null>(null);
@@ -135,6 +148,8 @@ export function A11yProvider({ children }: { children: ReactNode }) {
 
   const [speakingText, setSpeakingText] = useState<string | null>(null);
   const [loadingVoice, setLoadingVoice] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState<Ctx["voiceStatus"]>(null);
+  const voiceOverride = useRef<VoiceId | null>(null);
   const run = useRef(0);
   const audio = useRef<HTMLAudioElement | null>(null);
   const warned = useRef(false);
@@ -158,7 +173,11 @@ export function A11yProvider({ children }: { children: ReactNode }) {
       if (settings.voice === "natural") {
         try {
           setLoadingVoice(true);
-          const blob = await speechClip(text, settings.naturalVoice);
+          const blob = await speechClip(
+            text,
+            voiceOverride.current ?? settings.naturalVoice,
+            settings.localeStyle,
+          );
           setLoadingVoice(false);
           if (token !== run.current) return false;
           const el = audio.current ?? new Audio();
@@ -172,12 +191,17 @@ export function A11yProvider({ children }: { children: ReactNode }) {
             el.onpause = () => resolve();
           });
           await el.play();
+          setVoiceStatus({ source: "natural" });
           await ended;
           URL.revokeObjectURL(url);
           return token === run.current;
         } catch (error) {
           setLoadingVoice(false);
           if (token !== run.current) return false;
+          setVoiceStatus({
+            source: "device",
+            reason: error instanceof Error ? error.message : "The AI voice did not load",
+          });
           if (!warned.current) {
             warned.current = true;
             toast.message("Using this device's voice for now", {
@@ -197,7 +221,7 @@ export function A11yProvider({ children }: { children: ReactNode }) {
       });
       return token === run.current;
     },
-    [settings.voice, settings.naturalVoice, settings.speechRate],
+    [settings.voice, settings.naturalVoice, settings.localeStyle, settings.speechRate],
   );
 
   const speakParts = useCallback(
@@ -209,14 +233,18 @@ export function A11yProvider({ children }: { children: ReactNode }) {
       setSpeakingText(all);
       // Fetch the next clip while the current one plays.
       if (settings.voice === "natural") {
-        parts.slice(0, 2).forEach((p) => void speechClip(p, settings.naturalVoice).catch(() => undefined));
+        parts
+          .slice(0, 2)
+          .forEach(
+            (p) => void speechClip(p, settings.naturalVoice, settings.localeStyle).catch(() => undefined),
+          );
       }
       for (let i = 0; i < parts.length; i++) {
         if (token !== run.current) return;
         onPart?.(i);
         const next = parts[i + 1];
         if (next && settings.voice === "natural") {
-          void speechClip(next, settings.naturalVoice).catch(() => undefined);
+          void speechClip(next, settings.naturalVoice, settings.localeStyle).catch(() => undefined);
         }
         const finished = await playOne(parts[i]!, token);
         if (!finished) return;
@@ -227,10 +255,22 @@ export function A11yProvider({ children }: { children: ReactNode }) {
         onPart?.(-1);
       }
     },
-    [playOne, stopSpeaking, settings.voice, settings.naturalVoice],
+    [playOne, stopSpeaking, settings.voice, settings.naturalVoice, settings.localeStyle],
   );
 
   const speak = useCallback((text: string) => speakParts([text]), [speakParts]);
+
+  const preview = useCallback(
+    async (voice: VoiceId, text: string) => {
+      voiceOverride.current = voice;
+      try {
+        await speakParts([text]);
+      } finally {
+        voiceOverride.current = null;
+      }
+    },
+    [speakParts],
+  );
 
   useEffect(() => () => stopSpeaking(), [stopSpeaking]);
 
@@ -245,8 +285,22 @@ export function A11yProvider({ children }: { children: ReactNode }) {
       speaking,
       speakingText,
       loadingVoice,
+      voiceStatus,
+      preview,
     }),
-    [settings, update, reset, speak, speakParts, stopSpeaking, speaking, speakingText, loadingVoice],
+    [
+      settings,
+      update,
+      reset,
+      speak,
+      speakParts,
+      stopSpeaking,
+      speaking,
+      speakingText,
+      loadingVoice,
+      voiceStatus,
+      preview,
+    ],
   );
 
   return <A11yContext.Provider value={value}>{children}</A11yContext.Provider>;
